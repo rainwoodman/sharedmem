@@ -1,0 +1,17 @@
+quick sharedmem programming
+
+Example:
+
+import sharedmem
+
+data = sharedmem.empty(100)
+with sharedmem.Pool(use_threads=False, np=10) as pool:
+  def work(data, b, c):
+    data[...] = b * pool.rank + c
+    with pool.lock:
+      print pool.rank, data
+  pool.starmap(work, pool.zipsplit((data, 100, 3)))
+
+print data
+
+
