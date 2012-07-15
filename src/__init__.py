@@ -1,9 +1,102 @@
 """
-sharedmem facilities SHM parallization.
-empty and wrap allocates numpy arrays on the SHM
-Pool is a slave-pool that can be either based on Threads or Processes.
+Dispatch your trivially parallizable jobs with sharedmem.
 
-Notice that Pool.map and Pool.star map do not return ordered results.
+There are also sharedmem.argsort() and sharedmem.fromfile(),
+which are the parallel equivalent of numpy.argsort() and numpy.fromfile().
+
+Environment variable OMP_NUM_THREADS is used to determine the
+default number of Slaves.
+
+output = sharedmem.empty(8)
+output2 = sharedmem.empty(8)
+
+with sharedmem.Pool() as pool:
+  def work(arg1, arg2):
+    # do some work, return some value or not.
+    output2[arg1] = pool.rank
+    with pool.lock:
+      output[...] += arg2
+    pass
+  pool.starmap(work, pool.zipsplit((range(8), 1)))
+
+output2 will be an array of the ranks,
+and output will be 36, 36, ....
+
+Pool:
+  pool.rank, pool.np, and pool.lock, pool.local
+
+  sharedmem.Pool is much faster than multiprocessing.Pool because
+  it has very limited functionality, and does not pickle anything.
+  It will give gibberish on machines without a fork.
+
+  grabbing pool.lock ensures a critical section.
+  pool.local provides some basic local storage, but is not
+  well initialized. Do not use it.
+
+  pool.map() maps the parameters to work directly
+  pool.starmap() maps the parameters as an argument list.
+
+  The return value of pool.map() and pool.starmap() is a list of
+  the return values of work. The returned list is unordered unless
+  ordered=True is set in the call. 
+  Returning via the return value is discouraged, as it is much 
+  slower than directly writing the output to array objects.
+
+  pool.split() splits the variables given in the first parameter.
+  Lists and numpy Arrays are splited to almost equal sized chunks,
+  Scalar, and Tuples are repeated.
+  pool.zipsplit() zips the result of pool.split() so that it is
+  ready for pool.starmap()
+
+Exception handling:
+  once a Slave raises an Exception, it is collected by the master,
+  and that slave dies, with remaining already assigned to the slave
+  unfinished.
+
+  After all Slaves dies(those who did not raise an Exception will keep
+  running), the exceptions are collected by the Master, and the first
+  recieved exception will be reraised by the Master. 
+
+Joining Slaves:
+  On some large number of core machines with heavy IOs, some Slaves
+  will take longer than expected to join. We retry a few times until
+  eventually give it up. This is not usually a fatal problem as all work
+  are already done. 
+
+
+Debugging:
+  sharedmem.set_debug(True)
+
+  in debugging mode no Slaves are spawned. all work is done in the
+  Master, thus the work function can be debugged.
+
+Backends:
+  sharedmem has 2 parallel backends: Process and Threads.
+
+  If you do not write to array objects and all lengthy jobs
+  releases GIL, then the two backends are equivalent. 
+
+  1. Processes. 
+  * with sharedmem.Pool(use_threads=False) as pool:
+  * There is no need ensure lengthy calculation needs to release
+    the GIL.
+  * Any numpy array that needs to be written by
+    the slaves needs to reside on the shared memory segments. 
+    numpy arrays on the shared memory has type SharedMemArray.
+
+  * SharedMemArray are allocated with
+      sharedmem.empty()
+    or copied from local numpy array with
+      sharedmem.copy()
+
+    If possible use empty() for huge data sets.
+    Because with copy() the data has to be copied and memory usage
+    is (at least temporarily doubled)
+
+  2. Threads
+  * with sharedmem.Pool(use_threads=True)
+  * Slaves can write to ordinary numpy arrays.
+  * need to ensure lengthy calculation releases the GIL.
 
 """
 
@@ -23,8 +116,6 @@ from multiprocessing.sharedctypes import RawArray
 from listtools import cycle, zip, repeat
 from warnings import warn
 import heapq
-
-from gaepsi.tools import array_split
 
 __shmdebug__ = False
 __timeout__ = 10
@@ -78,7 +169,8 @@ class Pool:
 
     To use a Thread pool, pass use_threads=True
     there is a Lock accessible as 'with p.lock'
-    
+
+    Refer to the module document.
   """
   def __enter__(self):
     return self
@@ -492,3 +584,54 @@ def take(source, indices, axis=None, out=None, mode='wrap'):
       source.take(arg, axis=axis, out=out, mode=mode)
     pool.starmap(work, pool.zipsplit((indices, out)))
   return out
+
+def array_split(ary,indices_or_sections,axis = 0):
+    """
+    Split an array into multiple sub-arrays.
+
+    The only difference from numpy.array_split is we do not apply the
+    kludge that 'fixes' the 0 length array dimentions. We try to preserve
+    the original shape as much as possible, and only slice along axis
+
+    Please refer to the ``split`` documentation.  The only difference
+    between these functions is that ``array_split`` allows
+    `indices_or_sections` to be an integer that does *not* equally
+    divide the axis.
+
+    See Also
+    --------
+    split : Split array into multiple sub-arrays of equal size.
+
+    Examples
+    --------
+    >>> x = np.arange(8.0)
+    >>> np.array_split(x, 3)
+        [array([ 0.,  1.,  2.]), array([ 3.,  4.,  5.]), array([ 6.,  7.])]
+
+    """
+    try:
+        Ntotal = ary.shape[axis]
+    except AttributeError:
+        Ntotal = len(ary)
+    try: # handle scalar case.
+        Nsections = len(indices_or_sections) + 1
+        div_points = [0] + list(indices_or_sections) + [Ntotal]
+    except TypeError: #indices_or_sections is a scalar, not an array.
+        Nsections = int(indices_or_sections)
+        if Nsections <= 0:
+            raise ValueError('number sections must be larger than 0.')
+        Neach_section,extras = divmod(Ntotal,Nsections)
+        section_sizes = [0] + \
+                        extras * [Neach_section+1] + \
+                        (Nsections-extras) * [Neach_section]
+        div_points = numpy.array(section_sizes).cumsum()
+
+    sub_arys = []
+    sary = numpy.swapaxes(ary,axis,0)
+    for i in range(Nsections):
+        st = div_points[i]; end = div_points[i+1]
+        sub_arys.append(numpy.swapaxes(sary[st:end],axis,0))
+
+    return sub_arys
+
+

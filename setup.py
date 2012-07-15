@@ -5,6 +5,7 @@ setup(name="sharedmem", version="0.1",
       author_email="yfeng1@andrew.cmu.edu",
       description="Easy routines for coding on sharedmem machines",
       url="http://github.com/rainwoodman/sharedmem",
+      download_url="http://web.phys.cmu.edu/~yfeng1/gaepsi/sharedmem-0.1.tar.gz",
       zip_safe=False,
       package_dir = {'sharedmem': 'src'},
       packages = [
