@@ -12,6 +12,7 @@ setup(name="sharedmem", version="0.1",
         'sharedmem'
       ],
       requires=['numpy'],
+      install_requires=['numpy'],
       ext_modules = [
         Extension('sharedmem.' + name, 
              [ 'src/' + name.replace('.', '/') + '.c',],
