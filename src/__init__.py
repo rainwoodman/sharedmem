@@ -451,6 +451,10 @@ def copy(a):
 def wrap(a):
   return copy(a)
 
+def map(func, iterator):
+  with Pool(use_threads=True) as pool:
+    return pool.map(func, list(iterator), ordered=True)
+
 def fromfile(filename, dtype, count=None, chunksize=1024 * 1024 * 64, np=None):
   """ the default size 64MB agrees with lustre block size but is not an optimized choice.
   """
