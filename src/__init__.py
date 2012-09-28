@@ -184,11 +184,16 @@ class Pool:
   def local(self):
     return self._local
 
-  def __init__(self, np=None, use_threads=False):
+  def __init__(self, np=None, use_threads=False, nested=False):
     if np is None: np = cpu_count()
     self.np = np
     self._local = None
+    self.serial = False
+
     if use_threads:
+      if threading.currentThread().name != 'MainThread' and not nested:
+        self.serial = True
+        warn('nested Pool is avoided', stacklevel=2)
       self.QueueFactory = queue.Queue
       self.JoinableQueueFactory = queue.Queue
       def func(*args, **kwargs):
@@ -211,65 +216,43 @@ class Pool:
      # master threads's rank is None
       self._local.rank = None
 
-  def zipsplit(self, list, nchunks=None, chunksize=None):
-    return zip(*self.split(list, nchunks, chunksize))
+  def zipsplit(self, list, nchunks=None, chunksize=None, axis=0):
+    return zip(*self.split(list, nchunks, chunksize, axis))
 
-  def split(self, list, nchunks=None, chunksize=None):
-    """ Split every item in the list into nchunks, and return a list of chunked items.
-           - then used with p.starmap(work, zip(*p.split((xxx,xxx,xxxx), chunksize=1024))
-        For non sequence items, tuples, and 0d arrays, constructs a repeated iterator,
-        For sequence items(but tuples), convert to numpy array then use array_split to split them.
-        either give nchunks or chunksize. chunksize is only instructive, nchunk is estimated from chunksize
-    """
-    result = []
-    if nchunks is None:
-      if chunksize is None:
-        nchunks = self.np * 2
-      else:
-        nchunks = 0
-        for item in list:
-          if hasattr(item, '__len__') and not isinstance(item, tuple):
-            nchunks = int(len(item) / chunksize)
-        if nchunks == 0: nchunks = 1
-      
-    for item in list:
-      if isinstance(item, tuple):
-        result += [repeat(item)]
-      else:
-        aitem = numpy.asarray(item)
-        if aitem.shape:
-          result += [array_split(aitem, nchunks)]
-        else:
-          result += [repeat(item)]
+  def split(self, list, nchunks=None, chunksize=None, axis=0):
+    if nchunks is None and chunksize is None:
+      nchunks = self.np
+    return split(list, nchunks, chunksize, axis)
 
-    return result
-
-  def starmap(self, work, sequence, chunksize=1, ordered=False):
-    return self.map(work, sequence, chunksize, ordered=ordered, star=True)
+  def starmap(self, work, sequence, ordered=False, callback=None):
+    return self.map(work, sequence, ordered=ordered, callback=callback, star=True)
 
   def do(self, jobs):
     def work(job):
       job()
-    return self.map(work, jobs, chunksize=1, ordered=False, star=False)
+    return self.map(work, jobs, ordered=False, star=False)
 
-  def map(self, work, sequence, chunksize=1, ordered=False, star=False):
+  def map(self, workfunc, sequence, ordered=False, star=False, callback=None):
     """
-      calls work on every item in sequence. the return value is unordered unless ordered=True.
+      calls workfunc on every item in sequence. the return value is unordered unless ordered=True.
     """
     if __shmdebug__: 
-      print 'shm debugging'
-      return self.map_debug(work, sequence, chunksize, ordered, star)
+      warn('shm debugging')
+      return self.map_debug(workfunc, sequence, ordered, star)
+    if self.serial: 
+      return self.map_debug(workfunc, sequence, ordered, star)
+
     L = len(sequence)
     if not hasattr(sequence, '__getitem__'):
       raise TypeError('can only take a slicable sequence')
 
-    def worker(S, sequence, Q, i):
-      self._local._rank = i
+    def slave(S, Q, rank):
+      self._local._rank = rank
       dead = False
       error = None
       while True:
-        begin, end = S.get()
-        if begin is None: 
+        workcapsule = S.get()
+        if workcapsule is None: 
           S.task_done()
           break
         if dead: 
@@ -277,17 +260,16 @@ class Pool:
           S.task_done()
           continue
 
-        out = []
+        i, = workcapsule
         try:
-          for i in sequence[begin:end]:
-            if star: out += [ work(*i) ]
-            else: out += [ work(i) ]
+          if star: out = workfunc(*sequence[i])
+          else: out = workfunc(sequence[i])
         except Exception as e:
           error = (e, traceback.format_exc())
           Q.put(error)
           dead = True
 
-        if not dead: Q.put((begin, out))
+        if not dead: Q.put((i, out))
         S.task_done()
     P = []
     Q = self.QueueFactory()
@@ -295,21 +277,16 @@ class Pool:
 
     i = 0
 
-    N = 0
-    while i < L:
-      j = i + chunksize 
-      if j > L: j = L
-      S.put((i, j))
-      i = j
-      N = N + 1
+    for i, work in enumerate(sequence):
+      S.put((i, ))
 
-    for i in range(self.np):
-        S.put((None, i)) # sentinel
+    for rank in range(self.np):
+        S.put(None) # sentinel
 
     # the slaves will not raise KeyboardInterrupt Exceptions
     old = signal.signal(signal.SIGINT, signal.SIG_IGN)
-    for i in range(self.np):
-        p = self.SlaveFactory(target=worker, args=(S, sequence, Q, i))
+    for rank in range(self.np):
+        p = self.SlaveFactory(target=slave, args=(S, Q, rank))
         P.append(p)
 
     for p in P:
@@ -317,22 +294,23 @@ class Pool:
 
     signal.signal(signal.SIGINT, old)
 
-    S.join()
-
-
 #   the result is not sorted yet
     R = []
     error = []
-    while N > 0:
+    while L > 0:
       ind, r = Q.get()
       if isinstance(ind, Exception): 
-        error += [(ind, r)]
+        error.append((ind, r))
       elif ind is None:
         # the worker dead, nothing done
         pass
       else:
+        if callback is not None:
+          r = callback(r)
         R.append((ind, r))
-      N = N - 1
+      L = L - 1
+
+    S.join()
 
     # must clear Q before joining the Slaves or we deadlock.
     while not Q.empty():
@@ -360,12 +338,11 @@ class Pool:
 
     if ordered:
       heapq.heapify(R)
-      chain = itertools.chain.from_iterable((heapq.heappop(R)[1] for i in range(len(R))))
+      return numpy.array([ heapq.heappop(R)[1] for i in range(len(R))])
     else:
-      chain = itertools.chain.from_iterable((r[1] for r in R ))
-    return numpy.array(list(chain))
+      return numpy.array([r[1] for r in R ])
 
-  def map_debug(self, work, sequence, chunksize=1, ordered=False, star=False):
+  def map_debug(self, work, sequence, ordered=False, star=False):
     if star: return [work(*x) for x in sequence]
     else: return [work(x) for x in sequence]
 
@@ -405,8 +382,30 @@ class SharedMemArray(numpy.ndarray):
       So that when it is unpicled on the other process, the data is not copied,
       but simply viewed on the same address.
   """
-  def __init__(self):
-    pass
+  __array_priority__ = -900.0
+
+  def __new__(cls, shape, dtype='f8'):
+    dtype = numpy.dtype(dtype)
+    tp = ctypeslib._typecodes['|u1'] * dtype.itemsize
+    ra = RawArray(tp, int(numpy.asarray(shape).prod()))
+    shm = ctypeslib.as_array(ra)
+    if not shape:
+      fullshape = dtype.shape
+    else:
+      if not dtype.shape:
+        fullshape = shape
+      else:
+        if not hasattr(shape, "__iter__"):
+          shape = [shape]
+        else:
+          shape = list(shape)
+        if not hasattr(dtype.shape, "__iter__"):
+          dshape += [dtype.shape]
+        else:
+          dshape = list(dtype.shape)
+        fullshape = shape + dshape
+    return shm.view(dtype=dtype.base, type=SharedMemArray).reshape(fullshape)
+    
   def __reduce__(self):
     return __unpickle__, (self.__array_interface__, self.dtype)
 
@@ -414,46 +413,65 @@ copy_reg.pickle(SharedMemArray, __pickle__, __unpickle__)
 
 def empty_like(array, dtype=None):
   if dtype is None: dtype = array.dtype
-  return empty(array.shape, dtype)
+  return SharedMemArray(array.shape, dtype)
 
 def empty(shape, dtype='f8'):
   """ allocates an empty array on the shared memory """
-  dtype = numpy.dtype(dtype)
-  tp = ctypeslib._typecodes['|u1'] * dtype.itemsize
-  ra = RawArray(tp, int(numpy.asarray(shape).prod()))
-  shm = ctypeslib.as_array(ra)
-  if not shape:
-    fullshape = dtype.shape
-  else:
-    if not dtype.shape:
-      fullshape = shape
-    else:
-      if not hasattr(shape, "__iter__"):
-        shape = [shape]
-      else:
-        shape = list(shape)
-      if not hasattr(dtype.shape, "__iter__"):
-        dshape += [dtype.shape]
-      else:
-        dshape = list(dtype.shape)
-      fullshape = shape + dshape
-    
-  return shm.view(dtype=dtype.base, type=SharedMemArray).reshape(fullshape)
+  return SharedMemArray(shape, dtype)
 
 def copy(a):
   """ copies an array to the shared memory, use
      a = copy(a) to immediately dereference the old 'a' on private memory
    """
-  shared = empty(a.shape, dtype=a.dtype)
+  shared = SharedMemArray(a.shape, dtype=a.dtype)
   shared[:] = a[:]
   return shared
 
 def wrap(a):
   return copy(a)
 
-def map(func, iterator):
-  with Pool(use_threads=True) as pool:
-    return pool.map(func, list(iterator), ordered=True)
+def zipsplit(list, nchunks=None, chunksize=None, axis=0):
+  return zip(*self.split(list, nchunks, chunksize, axis))
+
+def split(list, nchunks=None, chunksize=None, axis=0):
+    """ Split every item in the list into nchunks, and return a list of chunked items.
+           - then used with p.starmap(work, zip(*p.split((xxx,xxx,xxxx), chunksize=1024))
+        For non sequence items, tuples, and 0d arrays, constructs a repeated iterator,
+        For sequence items(but tuples), convert to numpy array then use array_split to split them.
+        either give nchunks or chunksize. chunksize is only instructive, nchunk is estimated from chunksize
+    """
+    if numpy.isscalar(axis): axis = repeat(axis)
+
+    newlist = []
+    for item, ax in zip(list, axis):
+      if isinstance(item, tuple) or numpy.isscalar(item):
+        # do not chop off scalars or tuples
+        newlist.append((item, None, None))
+        continue
+      else:
+        item = numpy.asarray(item)
+        newlist.append((item, ax, item.shape[ax]))
+    L = numpy.array([l for item, ax, l in newlist if l is not None ])
+    if len(L) > 0 and numpy.diff(L).any():
+      raise ValueError('elements to chop off are of different lenghts')
+    L = L[0]
+
+    if nchunks is None:
+      if chunksize is None:
+        nchunks = cpu_count() * 2
+      else:
+        nchunks = int(L / chunksize)
+        if nchunks == 0: nchunks = 1
+
+    result = []
+    for item, ax, length in newlist:
+      if length is None:
+        # do not chop off scalars or tuples
+        result.append(repeat(item))
+      else:
+        result.append(array_split(item, nchunks, axis=ax))
+
+    return result
 
 def fromfile(filename, dtype, count=None, chunksize=1024 * 1024 * 64, np=None):
   """ the default size 64MB agrees with lustre block size but is not an optimized choice.
@@ -486,6 +504,15 @@ def fromfile(filename, dtype, count=None, chunksize=1024 * 1024 * 64, np=None):
 
   file.seek(cur + count * dtype.itemsize, os.SEEK_SET)
   return buffer
+
+def tofile(file, array, np=None):
+  """ write an array to file in parallel with mmap"""
+  file = numpy.memmap(file, array.dtype, 'w+', shape=array.shape)
+  with Pool(use_threads=True, np=np) as pool:
+    def writechunk(file, chunk):
+      file[...] = chunk[...]
+    pool.starmap(writechunk, pool.zipsplit((file, array)))
+  file.flush()
 
 def __round_to_power_of_two(i):
   if i == 0: return i
@@ -614,7 +641,7 @@ def array_split(ary,indices_or_sections,axis = 0):
 
     """
     try:
-        Ntotal = ary.shape[axis]
+        Ntotal = numpy.array(ary.shape)[axis]
     except AttributeError:
         Ntotal = len(ary)
     try: # handle scalar case.
