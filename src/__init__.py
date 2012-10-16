@@ -433,7 +433,7 @@ def wrap(a):
 def zipsplit(list, nchunks=None, chunksize=None, axis=0):
   return zip(*self.split(list, nchunks, chunksize, axis))
 
-def split(list, nchunks=None, chunksize=None, axis=0):
+def split(alist, nchunks=None, chunksize=None, axis=0):
     """ Split every item in the list into nchunks, and return a list of chunked items.
            - then used with p.starmap(work, zip(*p.split((xxx,xxx,xxxx), chunksize=1024))
         For non sequence items, tuples, and 0d arrays, constructs a repeated iterator,
@@ -443,14 +443,20 @@ def split(list, nchunks=None, chunksize=None, axis=0):
     if numpy.isscalar(axis): axis = repeat(axis)
 
     newlist = []
-    for item, ax in zip(list, axis):
-      if isinstance(item, tuple) or numpy.isscalar(item):
-        # do not chop off scalars or tuples
+    for item, ax in zip(alist, axis):
+      if isinstance(item, tuple) or numpy.isscalar(item) or item is None \
+        or not hasattr(item, '__len__'):
+        # do not chop off scalars or tuples or Nones
         newlist.append((item, None, None))
         continue
       else:
-        item = numpy.asarray(item)
-        newlist.append((item, ax, item.shape[ax]))
+        if ax > 0:
+          # need to convert to array, bad this uses too much memory
+          item = numpy.asarray(item)
+          newlist.append((item, ax, item.shape[ax]))
+        else:
+          newlist.append((item, ax, len(item)))
+
     L = numpy.array([l for item, ax, l in newlist if l is not None ])
     if len(L) > 0 and numpy.diff(L).any():
       raise ValueError('elements to chop off are of different lenghts')
@@ -468,9 +474,12 @@ def split(list, nchunks=None, chunksize=None, axis=0):
       if length is None:
         # do not chop off scalars or tuples
         result.append(repeat(item))
-      else:
+      elif ax > 0:
         result.append(array_split(item, nchunks, axis=ax))
-
+      else:
+        start = (numpy.arange(nchunks) * length / nchunks)
+        end = ((numpy.arange(nchunks) +1) * length / nchunks)
+        result.append([item[s:e] for s, e in zip(start, end)])
     return result
 
 def fromfile(filename, dtype, count=None, chunksize=1024 * 1024 * 64, np=None):
@@ -584,6 +593,14 @@ def argsort(data, order=None):
     sublengths = [x+y for x,y in zip(sublengths[::2], sublengths[1::2])]
 
   return arg1
+
+"""
+this is untested. and buggy if a.shape[axis] is too small
+def min(array, axis=None):
+  with sharedmem.Pool() as pool:
+    pool.map(lambda a: a.min(axis=axis),
+          pool.split((array,), axis=axis)).min(axis=axis)
+"""
 
 def take(source, indices, axis=None, out=None, mode='wrap'):
   """ the default mode is 'wrap', because 'raise' will copy the output array.
