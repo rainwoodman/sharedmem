@@ -238,9 +238,9 @@ class Pool:
     """
     if __shmdebug__: 
       warn('shm debugging')
-      return self.map_debug(workfunc, sequence, ordered, star)
+      return self.map_debug(workfunc, sequence, ordered, star, callback)
     if self.serial: 
-      return self.map_debug(workfunc, sequence, ordered, star)
+      return self.map_debug(workfunc, sequence, ordered, star, callback)
 
     L = len(sequence)
     if not hasattr(sequence, '__getitem__'):
@@ -342,9 +342,10 @@ class Pool:
     else:
       return numpy.array([r[1] for r in R ])
 
-  def map_debug(self, work, sequence, ordered=False, star=False):
-    if star: return [work(*x) for x in sequence]
-    else: return [work(x) for x in sequence]
+  def map_debug(self, work, sequence, ordered=False, star=False, callback=None):
+    if callback is None: callback = lambda x: x
+    if star: return [callback(work(*x)) for x in sequence]
+    else: return [callback(work(x)) for x in sequence]
 
 # Pickling is needed only for mp.Pool. Our pool is directly based on Process
 # thus no need to pickle anything
