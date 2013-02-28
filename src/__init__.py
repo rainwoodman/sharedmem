@@ -224,6 +224,11 @@ class Pool:
       nchunks = self.np
     return split(list, nchunks, chunksize, axis)
 
+  def arraysplit(self, array, nchunks=None, chunksize=None, axis=0):
+    if nchunks is None and chunksize is None:
+      nchunks = self.np
+    return split((array,), nchunks, chunksize, axis)[0]
+
   def starmap(self, work, sequence, ordered=False, callback=None):
     return self.map(work, sequence, ordered=ordered, callback=callback, star=True)
 
@@ -536,18 +541,18 @@ def __round_to_power_of_two(i):
   i |= (i >> 32)
   return i + 1
 
-def argsort(data, order=None):
+def argsort(data, serialargsort=lambda x:x.argsort(), out=None, chunksize=None, merge=None):
   """
      parallel argsort, like numpy.argsort
 
      first call numpy.argsort on nchunks of data,
      then merge the returned arg.
-     it uses 2 * len(data) * int64.itemsize of memory during calculation,
-     that is len(data) * int64.itemsize in addition to the size of the returned array.
+     it uses 2 * len(data) * intp.itemsize of memory during calculation,
+     that is len(data) * inttp.itemsize in addition to the size of the returned array.
      the default chunksize (65536*16) gives a sorting time of 0.4 seconds on a single core 2G Hz computer.
      which is justified by the cost of spawning threads and etc.
 
-     it uses an extra len(data)  * sizeof('i8') for the merging.
+     it uses an extra len(data)  * sizeof('intp') for the merging.
      we use threads because it turns out with threads the speed is faster(by 10%~20%)
      for sorting a 100,000,000 'f8' array, on a 16 core machine.
      
@@ -555,45 +560,53 @@ def argsort(data, order=None):
             http://keithschwarz.com/interesting/code/?dir=inplace-merge.
   """
 
-  from _mergesort import merge
-  from _mergesort import reorderdtype
+  if merge is None:
+    from _mergesort import merge
 #  if len(data) < 64*65536: return data.argsort()
 
-  if order: 
-    newdtype = reorderdtype(data.dtype, order)
-    data = data.view(newdtype)
+  if cpu_count() <= 1: return serialargsort(data)
 
-  if cpu_count() <= 1: return data.argsort()
+  if chunksize is None:
+    nchunks = __round_to_power_of_two(cpu_count()) * 4
+  else:
+    nchunks = __round_to_power_of_two(len(data) / chunksize + 1) * 4
 
-  nchunks = __round_to_power_of_two(cpu_count()) * 4
-
-  arg1 = numpy.empty(len(data), dtype='i8')
+  if out is None:
+    arg1 = numpy.empty(len(data), dtype='intp')
+    out = arg1
+  else:
+    assert out.dtype == numpy.dtype('intp')
+    assert len(out) == len(data)
+    arg1 = out
 
   data_split = numpy.array_split(data, nchunks)
-  sublengths = numpy.array([len(x) for x in data_split], dtype='i8')
-  suboffsets = numpy.zeros(shape = sublengths.shape, dtype='i8')
+  sublengths = numpy.array([len(x) for x in data_split], dtype='intp')
+  suboffsets = numpy.zeros(shape = sublengths.shape, dtype='intp')
   suboffsets[1:] = sublengths.cumsum()[:-1]
 
   arg_split = numpy.array_split(arg1, nchunks)
 
   with Pool(use_threads=True) as pool:
     def work(data, arg):
-      arg[:] = data.argsort()
+      arg[:] = serialargsort(data)
     pool.starmap(work, zip(data_split, arg_split))
   
-  arg2 = numpy.empty(len(data), dtype='i8')
+  arg2 = numpy.empty_like(arg1)
 
   def work(off1, len1, off2, len2, arg1, arg2, data):
     merge(data[off1:off1+len1+len2], arg1[off1:off1+len1], arg1[off2:off2+len2], arg2[off1:off1+len1+len2])
 
+  flip = 0
   while len(sublengths) > 1:
     with Pool(use_threads=True) as pool:
       pool.starmap(work, zip(suboffsets[::2], sublengths[::2], suboffsets[1::2], sublengths[1::2], repeat(arg1), repeat(arg2), repeat(data)))
+    flip = flip + 1
     arg1, arg2 = arg2, arg1
     suboffsets = [x for x in suboffsets[::2]]
     sublengths = [x+y for x,y in zip(sublengths[::2], sublengths[1::2])]
-
-  return arg1
+  if flip % 2 != 0:
+    out[:] = arg1[:]
+  return out
 
 """
 this is untested. and buggy if a.shape[axis] is too small

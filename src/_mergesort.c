@@ -85,18 +85,18 @@ static PyObject * merge(PyObject * self,
         &PyArray_Type, &B, 
         &PyArray_Type, &out)) return NULL;
 
-    intptr_t i = 0;
+    npy_intp i = 0;
 
     int (*compare)(void *, void *, void*) = PyArray_DESCR(data)->f->compare;
 
     size_t sizeA = PyArray_SIZE(A);
     size_t sizeB = PyArray_SIZE(B);
-    int64_t * Aptr = PyArray_DATA(A);
-    int64_t * Aend = Aptr + sizeA;
+    npy_intp * Aptr = PyArray_DATA(A);
+    npy_intp * Aend = Aptr + sizeA;
 
-    int64_t * Bptr = PyArray_DATA(B);
-    int64_t * Bend = Bptr + sizeB;
-    int64_t * Optr = PyArray_DATA(out);
+    npy_intp * Bptr = PyArray_DATA(B);
+    npy_intp * Bend = Bptr + sizeB;
+    npy_intp * Optr = PyArray_DATA(out);
 
     #define VA PyArray_GETPTR1(data, *Aptr)
     #define VB PyArray_GETPTR1(data, (*Bptr) + sizeA)
