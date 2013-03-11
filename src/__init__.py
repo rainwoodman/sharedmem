@@ -248,6 +248,7 @@ class Pool:
       return self.map_debug(workfunc, sequence, ordered, star, callback)
 
     L = len(sequence)
+    if L == 0: return []
     if not hasattr(sequence, '__getitem__'):
       raise TypeError('can only take a slicable sequence')
 
