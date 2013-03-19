@@ -275,7 +275,8 @@ class Pool:
           Q.put(error)
           dead = True
 
-        if not dead: Q.put((i, out))
+        if not dead: 
+          Q.put((i, out))
         S.task_done()
     P = []
     Q = self.QueueFactory()
@@ -304,7 +305,13 @@ class Pool:
     R = []
     error = []
     while L > 0:
-      ind, r = Q.get()
+      try:
+        ind, r = Q.get(timeout=10)
+      except queue.Empty:
+        if numpy.any([p.is_alive() for p in P]):
+          continue
+        else: 
+          raise Exception("child processes prematurely killed")
       if isinstance(ind, Exception): 
         error.append((ind, r))
       elif ind is None:
