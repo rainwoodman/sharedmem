@@ -161,13 +161,62 @@ static PyObject * reorderdtype(PyObject * self,
     return newd;
 }
 
+static PyObject * argmerge(PyObject * self,
+     PyObject * args, PyObject * kwds) {
+    static char * kwlist[] = {
+        "data", "A", "B", "out", NULL
+    };
+    PyArrayObject * data, * A, * B, * out;
+    if(!PyArg_ParseTupleAndKeywords(args, kwds, 
+        "O!O!O!O!", kwlist,
+        &PyArray_Type, &data, 
+        &PyArray_Type, &A, 
+        &PyArray_Type, &B, 
+        &PyArray_Type, &out)) return NULL;
+
+    int (*compare)(void *, void *, void*) = PyArray_DESCR(data)->f->compare;
+
+    size_t sizeA = PyArray_SIZE(A);
+    size_t sizeB = PyArray_SIZE(B);
+    npy_intp * Aptr = PyArray_DATA(A);
+    npy_intp * Aend = Aptr + sizeA;
+
+    npy_intp * Bptr = PyArray_DATA(B);
+    npy_intp * Bend = Bptr + sizeB;
+    npy_intp * Optr = PyArray_DATA(out);
+
+    #define AVA PyArray_GETPTR1(data, *Aptr)
+    #define AVB PyArray_GETPTR1(data, *Bptr)
+
+    Py_BEGIN_ALLOW_THREADS
+    while(Aptr < Aend || Bptr < Bend) {
+        while(Aptr < Aend && 
+                (Bptr == Bend || compare(AVA, AVB, data) <= 0)) 
+            *Optr++ = *Aptr++;
+        while(Bptr < Bend && 
+                (Aptr == Aend || compare(AVA, AVB, data) >= 0))
+            *Optr++ = *Bptr++;
+    }
+    Py_END_ALLOW_THREADS
+    Py_INCREF(Py_None);
+    return Py_None;
+}
+
+
 static PyMethodDef module_methods[] = {
 	{"merge", (PyCFunction) merge, METH_KEYWORDS, 
-    "merge(data, A, B, out) A, B, out are sorted arg indices, data is the unsorted data.\n"
+    "DEPRECATED: merge(data, A, B, out) A, B, out are sorted arg indices, data is the unsorted data.\n"
     "len(data) = len(A) + len(B) = len(out)\n"
     "data[:len(A)][A] is sorted\n"
     "data[len(A):][B] is sorted\n"
     "in other words both A and B are 0 started indices\n"
+    "everything must be continueous in memory!",},
+	{"argmerge", (PyCFunction) argmerge, METH_KEYWORDS, 
+    "argmerge(data, A, B, out) \n"
+    "A, B, out are sorted arg indices, data is the unsorted data.\n"
+    "data[A] is sorted\n"
+    "data[B] is sorted\n"
+    "data[out] will be sorted, and the content of out is the merge of A and B\n"
     "everything must be continueous in memory!",},
 	{"permute", (PyCFunction) permute, METH_KEYWORDS, 
     "permute(array, index) array = array[index] with O(1) storage. index has to be u8. array has to be 1d.\n"},
@@ -182,9 +231,11 @@ void init_mergesort(void) {
     import_ufunc();
 	m = Py_InitModule3("_mergesort", module_methods, "mergesort module for parallel mergesort");
 	PyObject * mergefunc = PyCFunction_New(module_methods, NULL);
-	PyObject * permutefunc = PyCFunction_New(module_methods + 1, NULL);
-	PyObject * reorderdtypefunc = PyCFunction_New(module_methods + 2, NULL);
+	PyObject * argmergefunc = PyCFunction_New(module_methods + 1, NULL);
+	PyObject * permutefunc = PyCFunction_New(module_methods + 2, NULL);
+	PyObject * reorderdtypefunc = PyCFunction_New(module_methods + 3, NULL);
 	PyModule_AddObject(m, "merge", mergefunc);
+	PyModule_AddObject(m, "argmerge", argmergefunc);
 	PyModule_AddObject(m, "permute", permutefunc);
 	PyModule_AddObject(m, "reorderdtype", reorderdtypefunc);
 }
