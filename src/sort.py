@@ -1,6 +1,25 @@
 import sharedmem
 import numpy
 
+def searchsorted(data, needle, side='left', chunksize=None, basesearch=None):
+    if basesearch is None:
+        basesearch = numpy.searchsorted
+    
+    if chunksize is None:
+        chunksize = 1024 * 1024 * 16
+
+    if sharedmem.cpu_count() <= 1 or len(needle) < chunksize: 
+        return basesearch(data, needle, side)
+
+    CHK = [slice(i, i + chunksize) for i in range(0, len(data), chunksize)]
+    out = numpy.empty(needle.shape, dtype='intp')
+
+    with sharedmem.Pool(use_threads=True) as pool:
+        def work(C):
+            out[C] = basesearch(data, needle[C], side)
+        pool.map(work, CHK)
+    return out 
+
 def argsort(data, out=None, chunksize=None, 
         baseargsort=None, 
         argmerge=None):
@@ -72,5 +91,5 @@ def argsort(data, out=None, chunksize=None,
         # only even flips out ends up pointing to arg2 and needs to be
         # copied
         out[:] = arg1
-    return out, arg1, arg2, flip
+    return out
 
