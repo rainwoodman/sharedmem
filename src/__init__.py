@@ -118,6 +118,8 @@ from warnings import warn
 import heapq
 
 from sort import argsort
+from sort import searchsorted
+from time import sleep
 
 __shmdebug__ = False
 __timeout__ = 10
@@ -218,6 +220,28 @@ class Pool:
      # master threads's rank is None
       self._local.rank = None
 
+    class ordered(object):
+      def __init__(self, pool, usethreads):
+        self.pool = pool
+        if usethreads:
+          self.event = threading.Event()
+          self.count = numpy.empty(1, dtype='i8')
+        else:
+          self.event = mp.Event()
+          self.count = empty(1, dtype='i8')
+        self.count[:] = 0
+        self.event.set()
+      def __enter__(self):
+        while True:
+          self.event.wait()
+          if self.count[0] == self.pool._local._i:
+             self.event.clear()
+             return self
+      def __exit__(self, type, value, traceback):
+        self.count[0] += 1
+        self.event.set()
+    self.ordered = ordered(self, use_threads)
+
   def zipsplit(self, list, nchunks=None, chunksize=None, axis=0):
     return zip(*self.split(list, nchunks, chunksize, axis))
 
@@ -231,28 +255,25 @@ class Pool:
       nchunks = self.np
     return split((array,), nchunks, chunksize, axis)[0]
 
-  def starmap(self, work, sequence, ordered=False, callback=None):
-    return self.map(work, sequence, ordered=ordered, callback=callback, star=True)
+  def starmap(self, work, sequence, ordered=False, reduce=None):
+    return self.map(work, sequence, ordered=ordered, reduce=reduce, star=True)
 
   def do(self, jobs):
     def work(job):
       job()
     return self.map(work, jobs, ordered=False, star=False)
 
-  def map(self, workfunc, sequence, ordered=False, star=False, callback=None):
+  def map(self, workfunc, sequence, ordered=False, star=False, reduce=None):
     """
       calls workfunc on every item in sequence. the return value is unordered unless ordered=True.
     """
     if __shmdebug__: 
       warn('shm debugging')
-      return self.map_debug(workfunc, sequence, ordered, star, callback)
+      return self.map_debug(workfunc, sequence, ordered, star, reduce)
     if self.serial: 
-      return self.map_debug(workfunc, sequence, ordered, star, callback)
+      return self.map_debug(workfunc, sequence, ordered, star, reduce)
 
-    L = len(sequence)
-    if L == 0: return []
-    if not hasattr(sequence, '__getitem__'):
-      raise TypeError('can only take a slicable sequence')
+    W = []
 
     def slave(S, Q, rank):
       self._local._rank = rank
@@ -262,6 +283,7 @@ class Pool:
         workcapsule = S.get()
         if workcapsule is None: 
           S.task_done()
+        #  print 'worker', rank, 'exit'
           break
         if dead: 
           Q.put((None, None))
@@ -269,17 +291,21 @@ class Pool:
           continue
 
         i, = workcapsule
+        self._local._i = i
+       # print 'worker', rank, 'doing', i
         try:
-          if star: out = workfunc(*sequence[i])
-          else: out = workfunc(sequence[i])
+          if star: out = workfunc(*W[i])
+          else: out = workfunc(W[i])
         except Exception as e:
           error = (e, traceback.format_exc())
           Q.put(error)
           dead = True
+       # print 'worker', rank, 'done', i
 
         if not dead: 
           Q.put((i, out))
         S.task_done()
+
     P = []
     Q = self.QueueFactory()
     S = self.JoinableQueueFactory()
@@ -287,7 +313,13 @@ class Pool:
     i = 0
 
     for i, work in enumerate(sequence):
+      # we do not send work through pipe
+      # because work may be large array and pickling them is
+      # painful
+      W.append(work)
       S.put((i, ))
+
+    L = len(W)
 
     for rank in range(self.np):
         S.put(None) # sentinel
@@ -310,6 +342,7 @@ class Pool:
       try:
         ind, r = Q.get(timeout=10)
       except queue.Empty:
+        warn('Left over jobs = %d' % L)
         if numpy.any([p.is_alive() for p in P]):
           continue
         else: 
@@ -320,16 +353,19 @@ class Pool:
         # the worker dead, nothing done
         pass
       else:
-        if callback is not None:
-          r = callback(r)
+        if reduce is not None:
+          if isinstance(r, tuple):
+            r = reduce(*r)
+          else:
+            r = reduce(r)
         R.append((ind, r))
       L = L - 1
-
-    S.join()
 
     # must clear Q before joining the Slaves or we deadlock.
     while not Q.empty():
       warn("unexpected extra queue item: %s" % str(Q.get()))
+
+    S.join()
       
     i = 0
     alive = 1
@@ -357,10 +393,15 @@ class Pool:
     else:
       return [r[1] for r in R ]
 
-  def map_debug(self, work, sequence, ordered=False, star=False, callback=None):
-    if callback is None: callback = lambda x: x
-    if star: return [callback(work(*x)) for x in sequence]
-    else: return [callback(work(x)) for x in sequence]
+  def map_debug(self, work, sequence, ordered=False, star=False, reduce=None):
+    def realreduce(x):
+      if reduce is None: return x
+      if isinstance(x, tuple):
+        return reduce(*x)
+      else:
+        return reduce(x)
+    if star: return [realreduce(work(*x)) for x in sequence]
+    else: return [realreduce(work(x)) for x in sequence]
 
 # Pickling is needed only for mp.Pool. Our pool is directly based on Process
 # thus no need to pickle anything
