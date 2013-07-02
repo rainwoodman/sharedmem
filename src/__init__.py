@@ -207,9 +207,11 @@ class Pool:
       self.SlaveFactory = func
       self.lock = threading.Lock()
       self._local = threading.local()
+      self.stop = threading.Event()
     else:
       self.QueueFactory = mp.Queue
       self.JoinableQueueFactory = mp.JoinableQueue
+      self.stop = mp.Event()
       def func(*args, **kwargs):
         slave = mp.Process(*args, **kwargs)
         slave.daemon = True
@@ -220,6 +222,7 @@ class Pool:
      # master threads's rank is None
       self._local.rank = None
 
+    self.stop.clear()
     class ordered(object):
       def __init__(self, pool, usethreads):
         self.pool = pool
@@ -240,7 +243,9 @@ class Pool:
       def __exit__(self, type, value, traceback):
         self.count[0] += 1
         self.event.set()
+
     self.ordered = ordered(self, use_threads)
+    self.critical = self.lock
 
   def zipsplit(self, list, nchunks=None, chunksize=None, axis=0):
     return zip(*self.split(list, nchunks, chunksize, axis))
@@ -267,65 +272,118 @@ class Pool:
     """
       calls workfunc on every item in sequence. the return value is unordered unless ordered=True.
     """
-    if __shmdebug__: 
-      warn('shm debugging')
-      return self.map_debug(workfunc, sequence, ordered, star, reduce)
-    if self.serial: 
+    if __shmdebug__ or self.serial: 
       return self.map_debug(workfunc, sequence, ordered, star, reduce)
 
-    W = []
+    if hasattr(sequence, "__getitem__"):
+        indirect = True
+    else:
+        indirect = False
 
     def slave(S, Q, rank):
       self._local._rank = rank
-      dead = False
-      error = None
       while True:
-        workcapsule = S.get()
+        if self.stop.is_set():
+           return
+        try:
+           workcapsule = S.get(timeout=1)
+        except queue.Empty:
+           continue
         if workcapsule is None: 
-          S.task_done()
-        #  print 'worker', rank, 'exit'
-          break
-        if dead: 
           Q.put((None, None))
           S.task_done()
-          continue
+          #print 'worker', rank, 'exit'
+          break
 
-        i, = workcapsule
+        i, work = workcapsule
         self._local._i = i
        # print 'worker', rank, 'doing', i
         try:
-          if star: out = workfunc(*W[i])
-          else: out = workfunc(W[i])
-        except Exception as e:
-          error = (e, traceback.format_exc())
-          Q.put(error)
-          dead = True
-       # print 'worker', rank, 'done', i
-
-        if not dead: 
+          if indirect:
+            work = sequence[i]
+          if star: out = workfunc(*work)
+          else: out = workfunc(work)
           Q.put((i, out))
-        S.task_done()
+          S.task_done()
+        except Exception as e:
+          Q.put((e, traceback.format_exc()))
+          S.task_done()
+        #print 'worker', rank, 'done', i
 
     P = []
-    Q = self.QueueFactory()
-    S = self.JoinableQueueFactory()
+    Q = self.QueueFactory(self.np)
+    S = self.JoinableQueueFactory(1)#self.np)
 
-    i = 0
+#   the result is not sorted yet
+    R = []
+    error = []
 
-    for i, work in enumerate(sequence):
-      # we do not send work through pipe
-      # because work may be large array and pickling them is
-      # painful
-      W.append(work)
-      S.put((i, ))
+    def feeder(S):
+        for i, work in enumerate(sequence):
+          # we do not send work through pipe
+          # because work may be large array and pickling them is
+          # painful
+          while True:
+            try:
+              if len(error) > 0: 
+                  # if error detected
+                  # just stops feeding at all.
+                  # we will die with an exception
+                  self.stop.set()
+                  return
+              if indirect:
+                  S.put((i, None), timeout=1)
+              else:
+                  S.put((i, work), timeout=1)
+              break
+            except queue.Full:
+              continue
+        for rank in range(self.np):
+            S.put(None) # sentinel
 
-    L = len(W)
+    def fetcher(Q):
+        L = self.np
+        while L > 0:
+          # see if the total number of alive processes
+          # match the number of processes that hasn't
+          # finished gracefully
+          # if unmatch and 
+          # the queue is still empty,(no worker finished 
+          # in the meanwhile)
+          # some workers have been killed by OS
+          if numpy.sum([p.is_alive() for p in P]) < L \
+               and Q.empty():
+            ind = Exception("Some processes killed unexpectedly\n")
+          else:
+            try:
+              ind, r = Q.get(timeout=2)
+            except queue.Empty:
+              continue
+          if ind is None:
+            # the worker dead, nothing done
+            #print 'gracefully worker finished', L
+            L = L - 1
+          elif isinstance(ind, Exception): 
+            #print 'worker errored', L
+            L = L - 1
+            error.append(ind)
+            # after first error is received, report and stop
+            # monitoring the queue
+            break
+          else:
+            # success
+            if reduce is not None:
+              if isinstance(r, tuple):
+                r = reduce(*r)
+              else:
+                r = reduce(r)
+            R.append((ind, r))
+        #print 'fetcher ended', L
 
-    for rank in range(self.np):
-        S.put(None) # sentinel
 
     # the slaves will not raise KeyboardInterrupt Exceptions
     old = signal.signal(signal.SIGINT, signal.SIG_IGN)
+
     for rank in range(self.np):
         p = self.SlaveFactory(target=slave, args=(S, Q, rank))
         P.append(p)
@@ -333,59 +391,35 @@ class Pool:
     for p in P:
         p.start()
 
+    fetcher = threading.Thread(target=fetcher, args=(Q,))
+    fetcher.start()
+    feeder = threading.Thread(target=feeder, args=(S,))
+    feeder.start()
+
     signal.signal(signal.SIGINT, old)
 
-#   the result is not sorted yet
-    R = []
-    error = []
-    while L > 0:
-      try:
-        ind, r = Q.get(timeout=10)
-      except queue.Empty:
-        warn('Left over jobs = %d' % L)
-        if numpy.any([p.is_alive() for p in P]):
-          continue
-        else: 
-          raise Exception("child processes prematurely killed")
-      if isinstance(ind, Exception): 
-        error.append((ind, r))
-      elif ind is None:
-        # the worker dead, nothing done
-        pass
-      else:
-        if reduce is not None:
-          if isinstance(r, tuple):
-            r = reduce(*r)
-          else:
-            r = reduce(r)
-        R.append((ind, r))
-      L = L - 1
+    while feeder.is_alive():
+        try:
+            feeder.join(2)
+        except (KeyboardInterrupt, SystemExit) as e:
+            error.append(e)
+            #print error
 
-    # must clear Q before joining the Slaves or we deadlock.
-    while not Q.empty():
-      warn("unexpected extra queue item: %s" % str(Q.get()))
+    #print 'feeder joined'
+    while fetcher.is_alive():
+    #    print 'fetcher joining'
+        fetcher.join(timeout=2)
 
-    S.join()
-      
-    i = 0
-    alive = 1
-    while alive > 0 and i < __timeout__:
-      alive = 0
-      for rank, p in enumerate(P):
-        if p.is_alive():
-          p.join(10)
-          if p.is_alive():
-            # we are in a serious Bug of sharedmem if reached here.
-            warn("still waiting for slave %d" % rank)
-            alive = alive + 1
-      i = i + 1
-
-    if alive > 0:
-      warn("%d slaves alive after queue joined" % alive)
-      
     # now report any errors
-    if error:
-      raise Exception('%d errors received\n' % len(error) + error[0][1])
+    if len(error) > 0:
+      raise Exception('%d errors received\n' % len(error) + str(error[0]))
+    else:
+      # must clear Q before joining the Slaves or we deadlock.
+      while not Q.empty():
+        raise Exception("unexpected extra queue item: %s" % str(Q.get()))
+
+      for rank, p in enumerate(P):
+        p.join()
 
     if ordered:
       heapq.heapify(R)
