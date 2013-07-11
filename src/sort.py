@@ -1,3 +1,4 @@
+# this is an independent package.
 import sharedmem
 import numpy
 
@@ -11,13 +12,13 @@ def searchsorted(data, needle, side='left', chunksize=None, basesearch=None):
     if sharedmem.cpu_count() <= 1 or len(needle) < chunksize: 
         return basesearch(data, needle, side)
 
-    CHK = [slice(i, i + chunksize) for i in range(0, len(data), chunksize)]
     out = numpy.empty(needle.shape, dtype='intp')
 
-    with sharedmem.Pool(use_threads=True) as pool:
-        def work(C):
+    with sharedmem.TPool() as pool:
+        def work(i):
+            C = slice(i, i + chunksize)
             out[C] = basesearch(data, needle[C], side)
-        pool.map(work, CHK)
+        pool.map(work, range(0, len(data), chunksize))
     return out 
 
 def argsort(data, out=None, chunksize=None, 
@@ -63,7 +64,7 @@ def argsort(data, out=None, chunksize=None,
     CHK = [slice(i, i + chunksize) for i in range(0, len(data), chunksize)]
     DUMMY = slice(len(data), len(data))
     if len(CHK) % 2: CHK.append(DUMMY)
-    with sharedmem.Pool(use_threads=True) as pool:
+    with sharedmem.TPool() as pool:
         def work(C):
             start, stop, step = C.indices(len(data))
             arg1[C] = baseargsort(data[C])
@@ -81,8 +82,8 @@ def argsort(data, out=None, chunksize=None,
         return slice(start1, stop2)
     flip = 0
     while len(CHK) > 1:
-        with sharedmem.Pool(use_threads=True) as pool:
-            CHK = pool.starmap(work, zip(CHK[::2], CHK[1::2]), ordered=True)
+        with sharedmem.TPool() as pool:
+            CHK = pool.starmap(work, zip(CHK[::2], CHK[1::2]))
             arg1, arg2 = arg2, arg1
             flip = flip + 1
         if len(CHK) == 1: break
