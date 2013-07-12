@@ -9,7 +9,7 @@ setup(name="sharedmem", version="0.1",
       zip_safe=False,
       package_dir = {'sharedmem': 'src'},
       packages = [
-        'sharedmem'
+        'sharedmem', 'sharedmem.core', 'sharedmem.lib'
       ],
       requires=['numpy'],
       install_requires=['numpy'],
@@ -21,8 +21,7 @@ setup(name="sharedmem", version="0.1",
              include_dirs=[get_include()],
              depends = extra
         ) for name, extra in [
-         ('listtools', []),
-         ('_mergesort', []),
+         ('lib._mergesort', []),
         ]
       ])
 

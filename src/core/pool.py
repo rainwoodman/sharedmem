@@ -8,7 +8,9 @@ from warnings import warn
 import traceback
 import heapq
 
-from tools import get_debug, cpu_count
+import backends
+
+__all__ = ['Pool', 'TPool']
 
 class Pool:
   """
@@ -38,34 +40,8 @@ class Pool:
   def local(self):
     return self._tls.local
 
-  def _init_threading(self):
-      self.QueueFactory = queue.Queue
-      self.JoinableQueueFactory = queue.Queue
-      self.EventFactory = threading.Event
-      def func(*args, **kwargs):
-        slave = threading.Thread(*args, **kwargs)
-        slave.daemon = True
-        return slave
-      self.SlaveFactory = func
-      self.LockFactory = threading.Lock
-      self._tls = threading.local()
-
-  def _init_mp(self):
-      self.QueueFactory = mp.Queue
-      self.JoinableQueueFactory = mp.JoinableQueue
-      self.EventFactory = mp.Event
-      self.LockFactory = mp.Lock
-      def func(*args, **kwargs):
-        slave = mp.Process(*args, **kwargs)
-        slave.daemon = True
-        return slave
-      self.SlaveFactory = func
-      self._tls = lambda: None
-     # master threads's rank is None
-      self._tls.rank = None
-
   def __init__(self, np=None, use_threads=False):
-    if np is None: np = cpu_count()
+    if np is None: np = backends.cpu_count()
     self.np = np
     self.serial = False
 
@@ -73,13 +49,18 @@ class Pool:
         if threading.currentThread().name != 'MainThread':
             self.serial = True
             warn('nested TPool is avoided', stacklevel=2)
-        self._init_threading()
+        self.backend = backends.ThreadBackend
     else:
-        self._init_mp()
+        self.backend = backends.ProcessBackend
 
+    backend = self.backend
+
+    self._tls = backend.StorageFactory()
+    self._tls.rank = None
     self._tls.local = {}
-    self.critical= self.LockFactory()
-    self.stop = self.EventFactory()
+
+    self.critical = backend.LockFactory()
+    self.stop = backend.EventFactory()
     self.stop.clear()
     self.ordered = ordered(self)
 
@@ -90,7 +71,7 @@ class Pool:
     """
       calls workfunc on every item in sequence. 
     """
-    if get_debug() or self.serial: 
+    if backends.get_debug() or self.serial: 
       return self.map_debug(workfunc, sequence, reduce, star)
 
     if hasattr(sequence, "__getitem__"):
@@ -129,8 +110,8 @@ class Pool:
         #print 'worker', rank, 'done', i
 
     P = []
-    Q = self.QueueFactory(self.np)
-    S = self.JoinableQueueFactory(1)#self.np)
+    Q = self.backend.QueueFactory(self.np)
+    S = self.backend.JoinableQueueFactory(1)#self.np)
 
 #   the result is not sorted yet
     R = []
@@ -208,7 +189,7 @@ class Pool:
     old = signal.signal(signal.SIGINT, signal.SIG_IGN)
 
     for rank in range(self.np):
-        p = self.SlaveFactory(target=slave, args=(S, Q, rank))
+        p = self.backend.SlaveFactory(target=slave, args=(S, Q, rank))
         P.append(p)
 
     for p in P:
@@ -265,7 +246,7 @@ class TPool(Pool):
 class ordered(object):
     def __init__(self, pool):
         self.pool = pool
-        self.event = pool.EventFactory()
+        self.event = pool.backend.EventFactory()
         self.count = RawValue('l')
         self.count.value = 0
         self.event.set()

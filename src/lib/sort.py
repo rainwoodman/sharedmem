@@ -1,6 +1,9 @@
 # this is an independent package.
-import sharedmem
+from .. import core as sharedmem
 import numpy
+from _mergesort import argmerge as default_argmerge
+
+__all__ = ['searchsorted', 'argsort']
 
 def searchsorted(data, needle, side='left', chunksize=None, basesearch=None):
     if basesearch is None:
@@ -44,7 +47,7 @@ def argsort(data, out=None, chunksize=None,
         baseargsort = lambda x:x.argsort()
 
     if argmerge is None:
-        from _mergesort import argmerge
+        argmerge = default_argmerge
 
     if chunksize is None:
         chunksize = 1024 * 1024 * 16
