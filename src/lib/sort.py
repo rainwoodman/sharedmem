@@ -26,7 +26,7 @@ def searchsorted(data, needle, side='left', chunksize=None, basesearch=None):
 
 def argsort(data, out=None, chunksize=None, 
         baseargsort=None, 
-        argmerge=None):
+        argmerge=None, np=None):
     """
      parallel argsort, like numpy.argsort
 
@@ -60,7 +60,10 @@ def argsort(data, out=None, chunksize=None,
         assert len(out) == len(data)
         arg1 = out
 
-    if sharedmem.cpu_count() <= 1 or len(data) < chunksize: 
+    if np is None:
+        np = sharedmem.cpu_count()
+
+    if np <= 1 or len(data) < chunksize: 
         out[:] = baseargsort(data)
         return out
 

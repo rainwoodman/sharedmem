@@ -4,7 +4,8 @@ import threading
 import Queue as queue
 
 __shmdebug__ = False
-__all__ = ['set_debug', 'get_debug', 'cpu_count', 'ThreadBackend', 'ProcessBackend']
+__all__ = ['set_debug', 'get_debug', 'total_memory', 'cpu_count', 'ThreadBackend',
+        'ProcessBackend', 'SlaveException', 'ProcessGroupFinished']
 
 def set_debug(flag):
   """ in debug mode (flag==True), no slaves are spawn,
@@ -19,6 +20,15 @@ def get_debug():
   global __shmdebug__
   return __shmdebug__
 
+def total_memory():
+  """ the amount of memory available for use.
+      default is the Free Memory entry in /proc/meminfo """
+  with file('/proc/meminfo', 'r') as f:
+      for line in f:
+          words = line.split()
+          if words[0].upper() == 'MEMTOTAL:':
+                return int(words[1]) * 1024
+  raise IOError('MemTotal unknown')
 def cpu_count():
   """ The cpu count defaults to the number of physical cpu cores
       but can be set with OMP_NUM_THREADS environment variable.
@@ -36,6 +46,14 @@ def cpu_count():
     return int(num)
   except:
     return multiprocessing.cpu_count()
+
+class SlaveException(Exception):
+    def __init__(self, e, tracebackstr):
+        Exception.__init__(self, "%s\n%s" % (str(e), tracebackstr))
+
+class ProcessGroupFinished(Exception):
+    def __init__(self):
+        Exception.__init__(self, "ProcessGroupFinished")
 
 class ThreadBackend:
       QueueFactory = staticmethod(queue.Queue)

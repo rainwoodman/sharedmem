@@ -43,7 +43,7 @@ class Pool:
   def __init__(self, np=None, use_threads=False):
     if np is None: np = backends.cpu_count()
     self.np = np
-    self.serial = False
+    self.serial = self.np == 0
 
     if use_threads:
         if threading.currentThread().name != 'MainThread':
@@ -90,7 +90,7 @@ class Pool:
            continue
         if workcapsule is None: 
           Q.put((None, None))
-          S.task_done()
+          #S.task_done()
           #print 'worker', rank, 'exit'
           break
 
@@ -103,15 +103,15 @@ class Pool:
           if star: out = workfunc(*work)
           else: out = workfunc(work)
           Q.put((i, out))
-          S.task_done()
+          #S.task_done()
         except Exception as e:
           Q.put((e, traceback.format_exc()))
-          S.task_done()
+          #S.task_done()
         #print 'worker', rank, 'done', i
 
     P = []
     Q = self.backend.QueueFactory(self.np)
-    S = self.backend.JoinableQueueFactory(1)#self.np)
+    S = self.backend.QueueFactory(1)#self.np)
 
 #   the result is not sorted yet
     R = []
@@ -204,7 +204,7 @@ class Pool:
 
     while feeder.is_alive():
         try:
-            feeder.join(2)
+            feeder.join(timeout=2)
         except (KeyboardInterrupt, SystemExit) as e:
             error.append((e, traceback.format_exc()))
             #print error
