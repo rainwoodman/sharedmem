@@ -10,115 +10,11 @@ from collections import deque
 
 import backends
 
-__all__ = ['ProcessGroup']
-
-class ProcessGroup(object):
-    def __init__(self, backend, main, np):
-        self.Errors = backend.QueueFactory(1)
-        self.main = main
-        self.guard = threading.Thread(target=self._guardMain)
-
-        self.guardDead = backend.EventFactory()
-        self.P = [
-            backend.SlaveFactory(target=self._slaveMain,
-                args=(rank,)) \
-                for rank in range(np)
-            ]
-        return
-
-    def _slaveMain(self, rank):
-        try:
-            self.main(rank, self)
-        except backends.SlaveException as e:
-            pass
-        except backends.ProcessGroupFinished as e:
-            pass
-        except Exception as e:
-            try:
-                self.Errors.put((e, traceback.format_exc()), timeout=0)
-            except queue.Full:
-                pass
-        finally:
-            pass
-
-    def killall():
-        for p in self.P:
-            if not p.is_alive(): continue
-            if isinstance(p, threading.Thread): p.join()
-            else: p.terminate()
-
-    def _guardMain(self):
-        Nalive = numpy.sum([p.is_alive() for p in self.P])
-        q = deque(self.P)
-        while self.Errors.empty() \
-          and len(q) > 0:
-            p = q.popleft()
-            p.join(timeout=1)
-            if p.is_alive(): q.append(p)
-            if isinstance(p, threading.Thread): continue
-            unexpected = numpy.sum([p.exitcode < 0 \
-                    for p in self.P if not p.is_alive()])
-            if unexpected > 0:
-                e = Exception("slave process killed by signal %d" % -p.exitcode)
-                try:
-                    self.Errors.put((e, ""), timeout=0)
-                except queue.Full:
-                    pass
-                self.killall()
-        self.guardDead.set()
-
-    def start(self):
-        self.guardDead.clear()
-
-        map(lambda x: x.start(), self.P)
-
-        # p is alive from the moment start returns.
-        # thus we can join them immediately after start returns.
-        # guardMain will check if the slave has been
-        # killed by the os, and simulate an error if so.
-        self.guard.start()
-
-    def get(self, Q, master=True):
-        while self.Errors.empty():
-            if not self.is_alive():
-                raise backends.ProcessGroupFinished
-            try:
-                return Q.get(timeout=1)
-            except queue.Empty:
-                continue
-        else:
-            if master:
-                raise backends.SlaveException(*self.Errors.get())
-            else:
-                raise backends.ProcessGroupFinished
-
-    def put(self, Q, item, master=True):
-        while self.Errors.empty():
-            if not self.is_alive():
-                raise backends.ProcessGroupFinished
-            try:
-                Q.put(item, timeout=1)
-                return
-            except queue.Full:
-                continue
-        else:
-            if master:
-                raise backends.SlaveException(*self.Errors.get())
-            else:
-                raise backends.ProcessGroupFinished
-
-    def is_alive(self):
-        return not self.guardDead.is_set()
-
-    def join(self):
-        while self.is_alive():
-            self.guardDead.wait(timeout=0.1)
-            if not self.Errors.empty():
-                raise backends.SlaveException(*self.Errors.get())
-        self.guard.join()
+__all__ = ['MapReduce']
 
 class MapReduce(object):
     def __init__(self, backend=backends.ProcessBackend, np=None):
+        """ if np is 0, run in serial """
         self.backend = backend
         self._tls = self.backend.StorageFactory()
         if np is None:
@@ -129,6 +25,21 @@ class MapReduce(object):
         self.ordered = Ordered(self.backend, self._tls)
 
     def map(self, func, sequence, reduce=None, star=False):
+        def realreduce(r):
+            if reduce:
+                if isinstance(r, tuple):
+                    return reduce(*r)
+                else:
+                    return reduce(r)
+            return r
+
+        def realfunc(i):
+            if star: return func(*i)
+            else: return func(i)
+        if self.np == 0:
+            #Do this in serial
+            return [realreduce(realfunc(i)) for i in sequence]
+
         Q = self.backend.QueueFactory(1)
         R = self.backend.QueueFactory(1)
 
@@ -143,36 +54,44 @@ class MapReduce(object):
                 capsule = pg.get(Q, master=False)
                 if capsule is None:
                     return
-                i, work = capsule
+                if len(capsule) == 1:
+                    i, = capsule
+                    work = sequence[i]
+                else:
+                    i, work = capsule
                 self.ordered.move(i)
-                if star: r = func(*work)
-                else : r = func(work)
+                r = realfunc(work)
                 pg.put(R, (i, r), master=False)
 
         pg = ProcessGroup(main=main, np=self.np, backend=self.backend)
         pg.start()
-        L = []
 
+        L = []
         N = []
         def fetcher():
             count = 0
             while pg.is_alive():
                 try:
-                    r = R.get(timeout=1)
+                    capsule = R.get(timeout=1)
                 except queue.Empty:
                     continue
-                heapq.heappush(L, r)
+                capsule = capsule[0], realreduce(capsule[1])
+                heapq.heappush(L, capsule)
                 count = count + 1
                 if len(N) > 0 and count == N[0]: 
+                    # if finished feeding see if all
+                    # results have been obtained
                     return
-
         
         fetcher = threading.Thread(None, fetcher)
         fetcher.start()
         
         j = 0
         for i, work in enumerate(sequence):
-            pg.put(Q, (i, work))
+            if not hasattr(sequence, '__getitem__'):
+                pg.put(Q, (i, work))
+            else:
+                pg.put(Q, (i, ))
             j = j + 1
         N.append(j)
 
@@ -182,7 +101,7 @@ class MapReduce(object):
         fetcher.join()
 
         rt = []
-        for len(L) > 0:
+        if len(L) > 0:
             rt.append(heapq.heappop(L)[1])
         return rt
 
