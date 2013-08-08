@@ -6,93 +6,91 @@ which are the parallel equivalent of numpy.argsort() and numpy.fromfile().
 Environment variable OMP_NUM_THREADS is used to determine the
 default number of Slaves.
 
-output = sharedmem.empty(8)
-output2 = sharedmem.empty(8)
+What's Unique about sharedmem?
 
-with sharedmem.Pool() as pool:
-def work(arg1, arg2):
-# do some work, return some value or not.
-output2[arg1] = pool.rank
-with pool.lock:
-output[...] += arg2
-pass
-pool.starmap(work, pool.zipsplit((range(8), 1)))
+sharedmem.Pool is a hybrid of Map-Reduce and OpenMP parallel For, so
+there are the goodies from both functional and procedural protocals:
 
-output2 will be an array of the ranks,
-and output will be 36, 36, ....
+1 Thread local storage regardless of backend(Thread or Process),
+   just have to save attributes to 
 
-Pool:
-pool.rank, pool.np, and pool.lock, pool.local
+   def work(jobid):
+      pool.tls.myownvalue = myownvalue
 
-sharedmem.Pool is much faster than multiprocessing.Pool because
-it has very limited functionality, and does not pickle anything.
-It will give gibberish on machines without a fork.
+  Note that it is a good idear to in general avoid using the Thread backend.
 
-grabbing pool.lock ensures a critical section.
-pool.local provides some basic local storage, but is not
-well initialized. Do not use it.
+2 Critical section
 
-pool.map() maps the parameters to work directly
-pool.starmap() maps the parameters as an argument list.
+   def work(jobid):
+       do stuff in parallel
+       with pool.critical:
+          do stuff in critical section
+       do more stuff in parallel
 
-The return value of pool.map() and pool.starmap() is a list of
-the return values of work. The returned list is unordered unless
-ordered=True is set in the call.
-Returning via the return value is discouraged, as it is much
-slower than directly writing the output to array objects.
+3 Ordered Execution 
 
-pool.split() splits the variables given in the first parameter.
-Lists and numpy Arrays are splited to almost equal sized chunks,
-Scalar, and Tuples are repeated.
-pool.zipsplit() zips the result of pool.split() so that it is
-ready for pool.starmap()
+   def work(jobid):
+       do stuff that can be parallel
+       with pool.ordered:
+          do stuff that has to be ordered and serial
+       do more stuff that can be parallel
+
+4 Reduce operation.
+  Reduce operation is executed on the Master process.
+  reduce() is called after the return value from Slave is passed
+  into Master. The return value of reduce is used to construct the
+  final returned list.
+
+   def work(jobid):
+      return stuff
+
+   def reduce(stuff):
+      reduce stuff on the Master,
+      this is serial
+
+   pool.map(work, listofjobs, reduce) 
+
+5 numpy like memory allocation of sharemed memory segments.
+
+  x = sharedmem.empty(1000, dtype='f8')
+  SharedMem segments are useful for communicating large chunk of 
+  data from Slaves to Master.
 
 Exception handling:
-once a Slave raises an Exception, it is collected by the master,
-and that slave dies, with remaining already assigned to the slave
-unfinished.
 
-After all Slaves dies(those who did not raise an Exception will keep
-running), the exceptions are collected by the Master, and the first
-recieved exception will be reraised by the Master.
-
-Joining Slaves:
-On some large number of core machines with heavy IOs, some Slaves
-will take longer than expected to join. We retry a few times until
-eventually give it up. This is not usually a fatal problem as all work
-are already done.
-
+  The Exception from a Slave is collected by the master, with stack
+  backtrace as a string. Upon the retrieval of the exception, master
+  asks all Slaves to die, then rethrows the exception.
 
 Debugging:
+
+  It is difficult to debug parallel code. There is a debugging mode
+  where everything is run from the Master, and can be debugged.
+
 sharedmem.set_debug(True)
 
-in debugging mode no Slaves are spawned. all work is done in the
-Master, thus the work function can be debugged.
-
 Backends:
-sharedmem has 2 parallel backends: Process and Threads.
+  sharedmem has 2 parallel backends: Process and Threads.
 
-If you do not write to array objects and all lengthy jobs
-releases GIL, then the two backends are equivalent.
+  1. Processes.
+    * Python code is executed in parallel. No GIL hassle.
+    * Modification to varibales, including contents of numpy arrrays
+      are copy on write. They do not show up in the Master.
+    * Use sharedmem.empty() for arrays that needs to be synced.
+  2. Threads
+    * Python code is executed in serial. numpy/scipy functions
+      are not fully GIL aware. Scipy uses some libraries that
+      are very thread unfriendly. 
+    * Modification to contents of variables shows up in Master.
+    * Need to be very careful. Avoid in general.
 
-1. Processes.
-* with sharedmem.Pool(use_threads=False) as pool:
-* There is no need ensure lengthy calculation needs to release
-the GIL.
-* Any numpy array that needs to be written by
-the slaves needs to reside on the shared memory segments.
-numpy arrays on the shared memory has type SharedMemArray.
+Other Tools:
+  * Sorting:
+      A Parallel merge-sort with argsort. It uses a lot of memory.
+      Use when appropriate.
 
-* SharedMemArray are allocated with
-sharedmem.empty()
-or copied from local numpy array with
-sharedmem.copy()
+  * experimental OpenMP like parallel sections. It's an abuse to python
+    decorators. Do not use.
 
-If possible use empty() for huge data sets.
-Because with copy() the data has to be copied and memory usage
-is (at least temporarily doubled)
+  
 
-2. Threads
-* with sharedmem.Pool(use_threads=True)
-* Slaves can write to ordinary numpy arrays.
-* need to ensure lengthy calculation releases the GIL.
