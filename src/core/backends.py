@@ -77,7 +77,7 @@ class ProcessGroup(object):
             pass
         except backends.ProcessGroupFinished as e:
             pass
-        except Exception as e:
+        except BaseException as e:
             try:
                 self.Errors.put((e, traceback.format_exc()), timeout=0)
             except queue.Full:

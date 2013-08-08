@@ -101,7 +101,7 @@ class MapReduce(object):
         fetcher.join()
 
         rt = []
-        if len(L) > 0:
+        while len(L) > 0:
             rt.append(heapq.heappop(L)[1])
         return rt
 
