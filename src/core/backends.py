@@ -2,6 +2,8 @@ import os
 import multiprocessing
 import threading
 import Queue as queue
+from collections import deque
+import traceback
 
 __shmdebug__ = False
 __all__ = ['set_debug', 'get_debug', 'total_memory', 'cpu_count', 'ThreadBackend',
@@ -57,9 +59,11 @@ class ProcessGroupFinished(Exception):
         Exception.__init__(self, "ProcessGroupFinished")
 
 class ProcessGroup(object):
-    def __init__(self, backend, main, np):
+    def __init__(self, backend, main, np, args=()):
         self.Errors = backend.QueueFactory(1)
+        self._tls = backend.StorageFactory()
         self.main = main
+        self.args = args
         self.guard = threading.Thread(target=self._guardMain)
 
         self.guardDead = backend.EventFactory()
@@ -71,11 +75,12 @@ class ProcessGroup(object):
         return
 
     def _slaveMain(self, rank):
+        self._tls.rank = rank
         try:
-            self.main(rank, self)
-        except backends.SlaveException as e:
+            self.main(self, *self.args)
+        except SlaveException as e:
             pass
-        except backends.ProcessGroupFinished as e:
+        except ProcessGroupFinished as e:
             pass
         except BaseException as e:
             try:
@@ -92,7 +97,7 @@ class ProcessGroup(object):
             else: p.terminate()
 
     def _guardMain(self):
-        Nalive = numpy.sum([p.is_alive() for p in self.P])
+        Nalive = sum([p.is_alive() for p in self.P])
         q = deque(self.P)
         while self.Errors.empty() \
           and len(q) > 0:
@@ -100,7 +105,7 @@ class ProcessGroup(object):
             p.join(timeout=1)
             if p.is_alive(): q.append(p)
             if isinstance(p, threading.Thread): continue
-            unexpected = numpy.sum([p.exitcode < 0 \
+            unexpected = sum([p.exitcode < 0 \
                     for p in self.P if not p.is_alive()])
             if unexpected > 0:
                 e = Exception("slave process killed by signal %d" % -p.exitcode)
@@ -125,21 +130,21 @@ class ProcessGroup(object):
     def get(self, Q, master=True):
         while self.Errors.empty():
             if not self.is_alive():
-                raise backends.ProcessGroupFinished
+                raise ProcessGroupFinished
             try:
                 return Q.get(timeout=1)
             except queue.Empty:
                 continue
         else:
             if master:
-                raise backends.SlaveException(*self.Errors.get())
+                raise SlaveException(*self.Errors.get())
             else:
-                raise backends.ProcessGroupFinished
+                raise ProcessGroupFinished
 
     def put(self, Q, item, master=True):
         while self.Errors.empty():
             if not self.is_alive():
-                raise backends.ProcessGroupFinished
+                raise ProcessGroupFinished
             try:
                 Q.put(item, timeout=1)
                 return
@@ -147,9 +152,9 @@ class ProcessGroup(object):
                 continue
         else:
             if master:
-                raise backends.SlaveException(*self.Errors.get())
+                raise SlaveException(*self.Errors.get())
             else:
-                raise backends.ProcessGroupFinished
+                raise ProcessGroupFinished
 
     def is_alive(self):
         return not self.guardDead.is_set()
@@ -158,27 +163,51 @@ class ProcessGroup(object):
         while self.is_alive():
             self.guardDead.wait(timeout=0.1)
             if not self.Errors.empty():
-                raise backends.SlaveException(*self.Errors.get())
+                raise SlaveException(*self.Errors.get())
         self.guard.join()
+
+class Ordered(object):
+    def __init__(self, backend):
+      #  self.counter = lambda : None
+        #multiprocessing.RawValue('l')
+        self.event = backend.EventFactory()
+        self.counter = multiprocessing.RawValue('l')
+        self.tls = backend.StorageFactory()
+
+    def reset(self):
+        self.counter.value = 0
+        self.event.set()
+
+    def move(self, iter):
+        self.tls.iter = iter
+
+    def __enter__(self):
+        while self.counter.value != self.tls.iter:
+            self.event.wait() 
+        self.event.clear()
+        return self
+
+    def __exit__(self, *args):
+        self.event.set()
+        self.counter.value = self.counter.value + 1
 
 
 class ThreadBackend:
       QueueFactory = staticmethod(queue.Queue)
-      JoinableQueueFactory = staticmethod(queue.Queue)
       EventFactory = staticmethod(threading.Event)
+      LockFactory = staticmethod(threading.Lock)
+      StorageFactory = staticmethod(threading.local)
       @staticmethod
       def SlaveFactory(*args, **kwargs):
         slave = threading.Thread(*args, **kwargs)
         slave.daemon = True
         return slave
-      LockFactory = staticmethod(threading.Lock)
-      StorageFactory = staticmethod(threading.local)
 
 class ProcessBackend:
       QueueFactory = staticmethod(multiprocessing.Queue)
-      JoinableQueueFactory = staticmethod(multiprocessing.JoinableQueue)
       EventFactory = staticmethod(multiprocessing.Event)
       LockFactory = staticmethod(multiprocessing.Lock)
+
       @staticmethod
       def SlaveFactory(*args, **kwargs):
         slave = multiprocessing.Process(*args, **kwargs)
