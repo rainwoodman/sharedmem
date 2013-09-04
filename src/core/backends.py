@@ -127,7 +127,7 @@ class ProcessGroup(object):
         # killed by the os, and simulate an error if so.
         self.guard.start()
 
-    def get(self, Q, master=True):
+    def get(self, Q, reraise=True):
         while self.Errors.empty():
             if not self.is_alive():
                 raise ProcessGroupFinished
@@ -136,12 +136,12 @@ class ProcessGroup(object):
             except queue.Empty:
                 continue
         else:
-            if master:
+            if reraise:
                 raise SlaveException(*self.Errors.get())
             else:
                 raise ProcessGroupFinished
 
-    def put(self, Q, item, master=True):
+    def put(self, Q, item, reraise=True):
         while self.Errors.empty():
             if not self.is_alive():
                 raise ProcessGroupFinished
@@ -151,7 +151,7 @@ class ProcessGroup(object):
             except queue.Full:
                 continue
         else:
-            if master:
+            if reraise:
                 raise SlaveException(*self.Errors.get())
             else:
                 raise ProcessGroupFinished
@@ -160,11 +160,10 @@ class ProcessGroup(object):
         return not self.guardDead.is_set()
 
     def join(self):
-        while self.is_alive():
-            self.guardDead.wait(timeout=0.1)
-            if not self.Errors.empty():
-                raise SlaveException(*self.Errors.get())
+        self.guardDead.wait()
         self.guard.join()
+        if not self.Errors.empty():
+            raise SlaveException(*self.Errors.get())
 
 class Ordered(object):
     def __init__(self, backend):

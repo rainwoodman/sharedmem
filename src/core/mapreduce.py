@@ -4,7 +4,11 @@ import heapq
 import gc
 import os
 import Queue as queue
-__all__ = ['MapReduce']
+__all__ = ['MapReduce', 'MapReduceByThread']
+
+def MapReduceByThread(np=None):
+    return MapReduce(backend=backends.ThreadBackend, np=np)
+
 class MapReduce(object):
     def __init__(self, backend=backends.ProcessBackend, np=None):
         """ if np is 0, run in serial """
@@ -20,7 +24,7 @@ class MapReduce(object):
         # the exception is muted in ProcessGroup,
         # as it will only be dispatched from master.
         while True:
-            capsule = pg.get(Q, master=False)
+            capsule = pg.get(Q, reraise=False)
             if capsule is None:
                 return
             if len(capsule) == 1:
@@ -30,7 +34,7 @@ class MapReduce(object):
                 i, work = capsule
             self.ordered.move(i)
             r = realfunc(work)
-            pg.put(R, (i, r), master=False)
+            pg.put(R, (i, r), reraise=False)
 
 
     def __enter__(self):
@@ -69,41 +73,45 @@ class MapReduce(object):
 
         L = []
         N = []
-        def fetcher(pg, R, N, L):
-            count = 0
-            while pg.is_alive():
-                try:
-                    capsule = R.get(timeout=1)
-                except queue.Empty:
-                    continue
-                capsule = capsule[0], realreduce(capsule[1])
-                heapq.heappush(L, capsule)
-                count = count + 1
-                if len(N) > 0 and count == N[0]: 
-                    # if finished feeding see if all
-                    # results have been obtained
-                    return
-        
-        fetcher = threading.Thread(None, fetcher, args=(pg, R, N, L))
-        fetcher.start()
-        
-        j = 0
-        for i, work in enumerate(sequence):
-            if not hasattr(sequence, '__getitem__'):
-                pg.put(Q, (i, work))
-            else:
-                pg.put(Q, (i, ))
-            j = j + 1
-        N.append(j)
+        def feeder(pg, Q, N):
+            j = 0
+            try:
+                for i, work in enumerate(sequence):
+                    if not hasattr(sequence, '__getitem__'):
+                        pg.put(Q, (i, work), reraise=False)
+                    else:
+                        pg.put(Q, (i, ), reraise=False)
+                    j = j + 1
+                N.append(j)
 
-        for i in range(self.np):
-            pg.put(Q, None)
-        pg.join()
-        fetcher.join()
+                for i in range(self.np):
+                    pg.put(Q, None)
+            except backends.ProcessGroupFinished:
+                return
+        
 
+        feeder = threading.Thread(None, feeder, args=(pg, Q, N))
+        feeder.start() 
+
+        count = 0
+        while pg.is_alive():
+            try:
+                capsule = R.get(timeout=1)
+            except queue.Empty:
+                continue
+            capsule = capsule[0], realreduce(capsule[1])
+            heapq.heappush(L, capsule)
+            count = count + 1
+            if len(N) > 0 and count == N[0]: 
+                # if finished feeding see if all
+                # results have been obtained
+                break
         rt = []
         while len(L) > 0:
             rt.append(heapq.heappop(L)[1])
+
+        pg.join()
+        feeder.join()
 
         return rt
 def main2():
