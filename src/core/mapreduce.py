@@ -58,22 +58,25 @@ class MapReduce(object):
         def realfunc(i):
             if star: return func(*i)
             else: return func(i)
+
         if self.np == 0:
             #Do this in serial
             return [realreduce(realfunc(i)) for i in sequence]
 
         Q = self.backend.QueueFactory(1)
         R = self.backend.QueueFactory(1)
+        self.ordered.reset()
+
         pg = backends.ProcessGroup(main=self.main, np=self.np,
                 backend=self.backend,
                 args=(Q, R, sequence, realfunc))
 
-        self.ordered.reset()
         pg.start()
 
         L = []
         N = []
         def feeder(pg, Q, N):
+            #   will fail silently if any error occurs.
             j = 0
             try:
                 for i, work in enumerate(sequence):
@@ -85,14 +88,16 @@ class MapReduce(object):
                 N.append(j)
 
                 for i in range(self.np):
-                    pg.put(Q, None)
-            except backends.ProcessGroupFinished:
+                    pg.put(Q, None, reraise=False)
+            except:
                 return
         
 
         feeder = threading.Thread(None, feeder, args=(pg, Q, N))
         feeder.start() 
 
+        # we run fetcher on main thread to catch exceptions
+        # raised by reduce 
         count = 0
         while pg.is_alive():
             try:

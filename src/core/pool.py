@@ -1,3 +1,16 @@
+from mapreduce import MapReduce
+import backends
+__all__ = ['Pool', 'TPool']
+
+class Pool(MapReduce):
+    def __init__(self, np=None):
+        MapReduce.__init__(self, backend=backends.ProcessBackend)
+
+class TPool(MapReduce):
+    def __init__(self, np=None):
+        MapReduce.__init__(self, backend=backends.ThreadBackend)
+
+'''
 import numpy
 from multiprocessing.sharedctypes import RawValue
 import multiprocessing as mp
@@ -10,9 +23,8 @@ import heapq
 
 import backends
 
-__all__ = ['Pool', 'TPool']
-
-class Pool:
+if False:
+ class Pool:
   """
     with Pool() as p
       def work(a, b, c):
@@ -238,12 +250,12 @@ class Pool:
     if star: return [realreduce(work(*x)) for x in sequence]
     else: return [realreduce(work(x)) for x in sequence]
 
-class TPool(Pool):
+ class TPool(Pool):
     def __init__(self, np=None):
         Pool.__init__(self, use_threads=True, np=np)
 
 
-class ordered(object):
+ class ordered(object):
     def __init__(self, pool):
         self.pool = pool
         self.event = pool.backend.EventFactory()
@@ -259,4 +271,4 @@ class ordered(object):
     def __exit__(self, type, value, traceback):
         self.count.value = self.count.value + 1
         self.event.set()
-
+'''

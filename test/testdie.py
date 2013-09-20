@@ -3,7 +3,8 @@ import numpy
 import sharedmem
 import os
 import signal
-with sharedmem.Pool(use_threads=False) as pool:
+
+with sharedmem.Pool() as pool:
     def work(i):
         print 'start', i
         time.sleep(numpy.random.uniform())

@@ -7,7 +7,7 @@ import traceback
 
 __shmdebug__ = False
 __all__ = ['set_debug', 'get_debug', 'total_memory', 'cpu_count', 'ThreadBackend',
-        'ProcessBackend', 'SlaveException', 'ProcessGroupFinished',
+        'ProcessBackend', 'SlaveException', 'StopProcessGroup',
         'ProcessGroup']
 
 def set_debug(flag):
@@ -54,9 +54,10 @@ class SlaveException(Exception):
     def __init__(self, e, tracebackstr):
         Exception.__init__(self, "%s\n%s" % (str(e), tracebackstr))
 
-class ProcessGroupFinished(Exception):
+class StopProcessGroup(Exception):
+    """ StopProcessGroup will terminate the slave process/thread """
     def __init__(self):
-        Exception.__init__(self, "ProcessGroupFinished")
+        Exception.__init__(self, "StopProcessGroup")
 
 class ProcessGroup(object):
     def __init__(self, backend, main, np, args=()):
@@ -79,8 +80,8 @@ class ProcessGroup(object):
         try:
             self.main(self, *self.args)
         except SlaveException as e:
-            pass
-        except ProcessGroupFinished as e:
+            raise RuntimError("slave exception shall never be caught by a slave")
+        except StopProcessGroup as e:
             pass
         except BaseException as e:
             try:
@@ -90,7 +91,7 @@ class ProcessGroup(object):
         finally:
             pass
 
-    def killall():
+    def killall(self):
         for p in self.P:
             if not p.is_alive(): continue
             if isinstance(p, threading.Thread): p.join()
@@ -108,7 +109,8 @@ class ProcessGroup(object):
             unexpected = sum([p.exitcode < 0 \
                     for p in self.P if not p.is_alive()])
             if unexpected > 0:
-                e = Exception("slave process killed by signal %d" % -p.exitcode)
+                e = Exception("slave process killed by signal %s" %
+                        str([-p.exitcode for p in self.P if not p.is_alive()]))
                 try:
                     self.Errors.put((e, ""), timeout=0)
                 except queue.Full:
@@ -128,9 +130,14 @@ class ProcessGroup(object):
         self.guard.start()
 
     def get(self, Q, reraise=True):
+        """ get an item from Q,
+            if an error is detected, 
+                raise StopProcessGroup if reraise is False
+                reraise the detected Error if reraise if True
+        """
         while self.Errors.empty():
             if not self.is_alive():
-                raise ProcessGroupFinished
+                raise StopProcessGroup
             try:
                 return Q.get(timeout=1)
             except queue.Empty:
@@ -139,12 +146,12 @@ class ProcessGroup(object):
             if reraise:
                 raise SlaveException(*self.Errors.get())
             else:
-                raise ProcessGroupFinished
+                raise StopProcessGroup
 
     def put(self, Q, item, reraise=True):
         while self.Errors.empty():
             if not self.is_alive():
-                raise ProcessGroupFinished
+                raise StopProcessGroup
             try:
                 Q.put(item, timeout=1)
                 return
@@ -154,7 +161,7 @@ class ProcessGroup(object):
             if reraise:
                 raise SlaveException(*self.Errors.get())
             else:
-                raise ProcessGroupFinished
+                raise StopProcessGroup
 
     def is_alive(self):
         return not self.guardDead.is_set()

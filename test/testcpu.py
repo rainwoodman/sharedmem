@@ -1,9 +1,17 @@
 import numpy
 import sharedmem
 import time
-with sharedmem.Pool(np=32) as pool:
+
+with sharedmem.Pool() as pool:
     def work(i):
-        print 'start', i
-        time.sleep(numpy.random.uniform())
-        print 'end', i
-    pool.map(work, range(100))
+        time.sleep(0.2)
+    now = time.time()
+    pool.map(work, range(pool.np * 16))
+    print 'Pool took', time.time() - now
+
+with sharedmem.TPool() as pool:
+    def work(i):
+        time.sleep(0.2)
+    now = time.time()
+    pool.map(work, range(pool.np * 16))
+    print 'TPool took', time.time() - now
