@@ -194,8 +194,10 @@ class Ordered(object):
         return self
 
     def __exit__(self, *args):
-        self.event.set()
+        # increase counter before releasing the value
+        # so that the others waiting will see the new counter
         self.counter.value = self.counter.value + 1
+        self.event.set()
 
 
 class ThreadBackend:

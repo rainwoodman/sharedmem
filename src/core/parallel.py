@@ -1,92 +1,292 @@
 import numpy
 from multiprocessing.sharedctypes import RawValue
-import threading
+import traceback as tb
 import signal
-import Queue as queue
-import heapq
 import time
-
+import os 
 import backends
+from multiprocessing import Lock, Event
+from multiprocessing.queues import SimpleQueue
+from threading import Thread
+from memory import empty
+class ParallelException(Exception):
+    pass
+
+class ErrorMonitor(object):
+    def __init__(self):
+        self.pipe = SimpleQueue()
+        self.message = None
+    def main(self):
+        while True:
+            message = self.pipe.get()
+            if message[0] == 'Q':
+                break
+            else:
+                self.message = message[1:]
+    
+    def haserror(self):
+        """ master only """
+        return self.message is not None
+    def start(self):
+        """ master only """
+        self.thread = Thread(target=self.main)
+        self.thread.start()
+    def join(self):
+        """ master only """
+        self.pipe.put('Q')
+        self.thread.join()
+        self.thread = None
+        if self.message is not None:
+            raise ParallelException(self.message)
+
+    def slaveraise(self, error, traceback):
+        """ slave only """
+        self.pipe.put('E' + str(error) + tb.format_exc())
 
 
 class Parallel(object):
-    def __init__(self, backend=backends.ProcessBackend, np=None):
-        self.backend = backend
-        self._tls = self.backend.StorageFactory()
-        if np is None:
-            self.np = backends.cpu_count()
-        else:
-            self.np = np
-        self.critical = self.backend.LockFactory()
-        self.WorkQueue = self.backend.QueueFactory(1)
-        self.ordered = Ordered(self.backend, self._tls)
-    @property
-    def debug(self):
-        return backends.get_debug()
+    def __init__(self, *args, **kwargs):
+        self.np = kwargs.get('np', backends.cpu_count())
+        self.rank = 0
+        self.var = Var()
+        self._variables = args
+    def _ismaster(self):
+        return self.rank == 0
 
-    @property
-    def rank(self):
-        return self._tls.rank
+    def _fork(self):
+        self._children = []
+        self.rank = 0
+        for i in range(self.np - 1):
+            if not self._ismaster(): continue
+            pid = os.fork()
+            if pid != 0:
+                self._children.append(pid)
+            else:
+                self.rank = i + 1
 
-    def __call__(self, body):
-        Q = self.backend.QueueFactory(self.np)
-        def main(rank, pg):
-            self._tls.rank = rank
-            Q.put(body(self))
-
-        pg = ProcessGroup(self.backend, main, self.np)
-        pg.start()
-        result = [pg.get(Q) for rank in range(self.np)]
-        pg.join()
+    def __enter__(self):
+        self.critical = Lock()
+        self._alive = True
+        self._errormessage = None
+        self._errormon = ErrorMonitor() 
+        class Ordered(BaseOrdered):
+            event = Event()
+            done = empty((), dtype='intp')
+        self._Ordered = Ordered
+        
+        for param in self._variables:
+            param.beforefork(self)
+        self._fork()
+        for param in self._variables:
+            param.afterfork(self)
+        if self._ismaster():
+            self._errormon.start()
         return self
 
-    def _ForStatic(self, range):
-        rank = self.rank
-        start = rank * len(range)// self.np
-        end = (rank + 1) * len(range) // self.np
-        for i in range[start:end]:
+    def __exit__(self, type, exception, traceback):
+        if not self._ismaster(): 
+            # put error to the pipe
+            if type is not None:
+                # need to make sure each (per) message 
+                # won't block the pipe!
+                self._errormon.slaveraise(exception, traceback)
+            os._exit(0)
+        else:
+            if type is not None:
+                for pid in self._children:
+                    os.kill(pid, 6)
+            n = 0
+            while n < self.np - 1:
+                pid, status = os.wait()
+                n = n + 1
+            self._errormon.join()
+            for param in self._variables:
+                if isinstance(param, Reduction):
+                    param.reduce(self)
+        self.critical = None
+
+    def forloop(self, range, ordered=False):
+        return ForLoop(range, ordered, self)
+
+class ForLoop(object):
+    def __init__(self, range, ordered, parallel):
+        start = parallel.rank * len(range) // parallel.np
+        end = (parallel.rank + 1)* len(range) // parallel.np
+        self.range = range[start:end]
+        self.iter = numpy.empty((), dtype='intp')
+        self.iter[...] = 0
+        if parallel._ismaster():
+            self._haserror = parallel._errormon.haserror
+        else:
+            self._haserror = lambda : False
+        if ordered:
+            self.ordered = parallel._Ordered(self.iter)
+    def __iter__(self):
+        for i in self.range:
+            if self._haserror():
+                break
+            self.iter[...] = i
             yield i
+        self._haserror = None
 
-    def _ForDynamic(self, range):
-        if self.rank == 0:
-            self.WorkQueue.put(0)
-        while True:
-            i = self.WorkQueue.get()
-            i = i + 1
-            if i <= len(range):
-                self.WorkQueue.put(i)
-                yield i - 1, range[i - 1]
-                continue
-            if i <= len(range) + self.np - 1:
-                self.WorkQueue.put(i)
-            break
+class BaseOrdered(object):
+    """subclass and set kls.done, cls.event to sharedmem objects """
+    def __init__(self, iterref):
+        self.done[...] = 0
+        self.event.clear()
+        self.iterref = iterref
+    def task_done(self):
+        self.done[...] += 1
+        self.event.set()
+    def __enter__(self):
+        while self.iterref != self.done:
+            self.event.wait()
+        self.event.clear()
+        return self
+    def __exit__(self, *args):
+        self.task_done()
 
-    def For(self, range, schedule='static'):
-        if schedule == 'static':
-            _For = self._ForStatic
-        if schedule == 'dynamic':
-            _For = self._ForDynamic
+class Var(object):
+    def __init__(self):
+        self.__dict__['map'] = {}
+    def _register(self, varset, index):
+        self.__dict__['map'][index] = varset
+    def __getattr__(self, index):
+        set = self.__dict__['map'][index]
+        return set[index]
+    def __setattr__(self, index, value):
+        set = self.__dict__['map'][index]
+        set[index] = value
 
-        if self.rank == 0:
-            self.ordered.reset()
+class VarSet(object):
+    """ overridebefore fork and afterfork"""
+    def __init__(self, **kwargs):
+        self._input = [(key, numpy.asarray(kwargs[key]))
+                for key in kwargs]
+        self._dtype = [(key, (item.dtype, item.shape)) for key, item in self._input]
 
-        for i, work in _For(range):
-            self.ordered.move(i)
-            yield work
-        
+    def beforefork(self, parallel):
+        """ allocate self.data with dtype """
+        pass
+
+    def afterfork(self, parallel):
+        self._input = None
+        self._dtype = None
+        for key in self:
+            parallel.var._register(self, key)
+
+    def __iter__(self):
+        return iter(self.data.dtype.names)
+    def __getitem__(self, index):
+        return self.data[index]
+    def __setitem__(self, index, value):
+        self.data[index][...] = value
+
+class Shared(VarSet):
+    def beforefork(self, parallel):
+        self.data = empty((), self._dtype)
+        for key, value in self._input:
+            self.data[key] = value
+
+class Private(VarSet):
+    def beforefork(self, parallel):
+        self.data = numpy.empty((), self._dtype)
+        for key, value in self._input:
+            self.data[key] = value
+
+class Reduction(VarSet):
+    def __init__(self, ufunc, **kwargs):
+        self._ufunc = ufunc
+        VarSet.__init__(self, **kwargs)
+
+    def beforefork(self, parallel):
+        self._fulldata = empty(parallel.np, self._dtype)
+
+    def afterfork(self, parallel):
+        self.data = self._fulldata[parallel.rank]
+        for key, value in self._input:
+            self.data[key] = value
+        VarSet.afterfork(self, parallel)
+
+    def reduce(self, parallel):
+        if parallel._ismaster():
+            for key in self:
+                self[key] = self._ufunc.reduce(self._fulldata[key], axis=0)
+        else:
+            self.data = self._fulldata[0].view(type=Shared)
+
+def testraiseordered():
+    with Parallel(
+            Reduction(numpy.add, a=[0, 0])
+            ) as p:
+        r = p.forloop(range(20), ordered=True)
+        for i in r:
+            with r.ordered:
+                p.var.a += numpy.array([i, i * 10])
+                if i == 19:
+                    raise Exception('raised at i == 19')
+    assert (p.var.a == [190, 1900]).all()
+
+def testraisecritical():
+    with Parallel(
+            Reduction(numpy.add, a=[0, 0])
+            ) as p:
+        r = p.forloop(range(20), ordered=True)
+        for i in r:
+            with p.critical:
+                p.var.a += numpy.array([i, i * 10])
+                if i == 19:
+                    raise Exception('raised at i == 19')
+    assert (p.var.a == [190, 1900]).all()
+
+def testreduction():
+    with Parallel(
+            Reduction(numpy.add, a=[0, 0])
+            ) as p:
+        r = p.forloop(range(20), ordered=True)
+        for i in r:
+            p.var.a += numpy.array([i, i * 10])
+    assert (p.var.a == [190, 1900]).all()
+
+def testprivate():
+    truevalue = numpy.zeros(2)
+    with Parallel(
+            Private(a=[0, 0])
+            ) as p:
+        r = p.forloop(range(100), ordered=True)
+        for i in r:
+            p.var.a += numpy.array([i, i * 10])
+            if p._ismaster(): 
+                truevalue += numpy.array([i, i * 10])
+    assert (p.var.a == truevalue).all()
+
+def testshared():
+    with Parallel(
+            Shared(a=[0, 0]),
+            Reduction(numpy.add, b=[0, 0])
+            ) as p:
+        r = p.forloop(range(100), ordered=True)
+        for i in r:
+            with p.critical:
+                p.var.a += numpy.array([i, i * 10])
+            p.var.b += numpy.array([i, i * 10]) 
+            
+    assert (p.var.a == p.var.b).all()
+
 def main():
-    import time
-    import os
-    import signal
-    import numpy
+    testreduction()
+    testprivate()
+    testshared()
+    try:
+        testraisecritical()
+    except ParallelException as e:
+        print e
+        pass
+    try:
+        testraiseordered()
+    except ParallelException as e:
+        print e
+        pass
 
-    @Parallel(np=8, backend=backends.ThreadBackend)
-    def body(par):
-        for i in par.For(range(24), schedule='dynamic'):
-            time.sleep(1)
-            with par.ordered:
-                print par.rank, i, i * i
-            with par.critical:
-                print par.rank, i, i * i
-            if par.rank < 7:
-                asfqewf
+if __name__ == '__main__':
+    main()
