@@ -6,6 +6,7 @@ import time
 import os 
 import backends
 from multiprocessing import Lock, Event
+from multiprocessing import Semaphore
 from multiprocessing.queues import SimpleQueue
 from threading import Thread
 from memory import empty
@@ -69,9 +70,16 @@ class Parallel(object):
         self._alive = True
         self._errormessage = None
         self._errormon = ErrorMonitor() 
+        self._shared = empty((),
+                dtype=[
+                    ('ordered', 'intp'),
+                    ('barrier', 'intp')])
+        self._event = Event()
+        self._shared['barrier'] = 0
+        self._barrier = Barrier(self.np, self._shared['barrier'])
         class Ordered(BaseOrdered):
-            event = Event()
-            done = empty((), dtype='intp')
+            turnstile = Semaphore(1)
+            done = self._shared['ordered'][...]
         self._Ordered = Ordered
         
         for param in self._variables:
@@ -105,8 +113,38 @@ class Parallel(object):
                     param.reduce(self)
         self.critical = None
 
+    def barrier(self):
+        self._barrier.wait()
+
     def forloop(self, range, ordered=False):
         return ForLoop(range, ordered, self)
+
+class Barrier:
+    def __init__(self, n, count):
+        self.n = n
+        self.count = count
+        self.count[...] = 0
+        self.mutex = Semaphore(1)
+        self.turnstile = Semaphore(0)
+        self.turnstile2 = Semaphore(0)
+    def phase1(self):
+        self.mutex.acquire()
+        self.count[...] += 1
+        if self.count == self.n:
+            [self.turnstile.release() for i in range(self.n)]
+        self.mutex.release()
+        self.turnstile.acquire()
+    def phase2(self):
+        self.mutex.acquire()
+        self.count[...] -= 1
+        if self.count == 0:
+            [self.turnstile2.release() for i in range(self.n)]
+        self.mutex.release()
+        self.turnstile2.acquire()
+    def wait(self):
+        if self.n == 0: return
+        self.phase1()
+        self.phase2()
 
 class ForLoop(object):
     def __init__(self, range, ordered, parallel):
@@ -133,18 +171,17 @@ class BaseOrdered(object):
     """subclass and set kls.done, cls.event to sharedmem objects """
     def __init__(self, iterref):
         self.done[...] = 0
-        self.event.clear()
         self.iterref = iterref
-    def task_done(self):
-        self.done[...] += 1
-        self.event.set()
+
     def __enter__(self):
         while self.iterref != self.done:
-            self.event.wait()
-        self.event.clear()
+            pass
+
+        self.turnstile.acquire()
         return self
     def __exit__(self, *args):
-        self.task_done()
+        self.done[...] += 1
+        self.turnstile.release()
 
 class Var(object):
     def __init__(self):
@@ -270,13 +307,25 @@ def testshared():
             with p.critical:
                 p.var.a += numpy.array([i, i * 10])
             p.var.b += numpy.array([i, i * 10]) 
-            
+        
     assert (p.var.a == p.var.b).all()
 
+def testbarrier():
+    now = time.time()
+    with Parallel(
+            Shared(a=[0, 0]),
+            Reduction(numpy.add, b=[0, 0])
+            ) as p:
+        time.sleep(p.rank * 0.01)
+        p.barrier()
+        p.barrier()
+        
+    print time.time() - now 
 def main():
     testreduction()
     testprivate()
     testshared()
+    testbarrier()
     try:
         testraisecritical()
     except ParallelException as e:
