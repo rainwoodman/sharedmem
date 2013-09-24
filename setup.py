@@ -1,11 +1,11 @@
 from numpy.distutils.core import setup, Extension
 from numpy import get_include
-setup(name="sharedmem", version="0.1",
+setup(name="sharedmem", version="0.2",
       author="Yu Feng",
       author_email="yfeng1@andrew.cmu.edu",
       description="Easy routines for coding on sharedmem machines",
       url="http://github.com/rainwoodman/sharedmem",
-      download_url="http://web.phys.cmu.edu/~yfeng1/gaepsi/sharedmem-0.1.tar.gz",
+      download_url="http://web.phys.cmu.edu/~yfeng1/gaepsi/sharedmem-0.2.tar.gz",
       zip_safe=False,
       package_dir = {'sharedmem': 'src'},
       packages = [

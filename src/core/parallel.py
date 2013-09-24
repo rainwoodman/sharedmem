@@ -1,144 +1,48 @@
-import numpy
-import traceback as tb
-import signal
-import time
-import os 
-import backends
-import pickle
-import signal
+"""
+   OpenMP like multiprocessing
 
-from multiprocessing import Lock
-from multiprocessing.synchronize import Semaphore
-from multiprocessing.queues import SimpleQueue
-from threading import Thread
-from memory import empty
-from sys import settrace
+   Example:
 
-__all__ = ['Parallel', 'ParallelException']
-class ParallelException(Exception):
-    pass
+        with Parallel(
+                Reduction(numpy.add, a=[0, 0])
+                ) as p:
+            for i, ordered in p.forloop(range(20), 
+                    ordered=True, schedule='dynamic'):
+                with ordered:
+                    p.var.a += numpy.array([i, i * 10])
+                    if i == 19:
+                        raise ValueError('raised at i == 19')
 
-class SafeSemaphore(Semaphore):
-    def __enter__(self):
-        try:
-            Break.mute()
-        except Break:
-            Break.mute()
-        rt = Semaphore.__enter__(self)
-        Break.listen()
-        return rt
-    def __exit__(self, *args):
-        try:
-            Break.mute()
-        except Break:
-            Break.mute()
-        rt = Semaphore.__exit__(self, *args)
-        Break.listen()
-        return rt
+   1 All variables are by default 'Private': this differ from OpenMP
 
-class Break(BaseException):
-    muted = False
-    mutex = Semaphore(1)
-    @staticmethod
-    def handler(a, b):
-        tb = []
-        while b is not None:
-            tb.append('%d %s %d' % (b.f_lineno, b.f_code.co_filename,
-                os.getpid()))
-            b = b.f_back
-        Break.cleanup()
-        raise Break('\n'.join(tb))
-    @classmethod
-    def listen(kls, cleanup):
-        signal.signal(signal.SIGTRAP, kls.handler)
-        kls.cleanup = cleanup
-        kls.muted = False
-    @classmethod
-    def mute(kls):
-        if not kls.muted:
-            kls.muted = True
-            signal.signal(signal.SIGTRAP, signal.SIG_IGN)
-    @staticmethod
-    def notify_all():
-        os.kill(os.getpid(), signal.SIGTRAP)
-    @staticmethod
-    def notify(pid):
-        os.kill(pid, signal.SIGTRAP)
+   2 To access variables defined for the Parallel scope, use p.var
 
-Break.mute()
+   3 This is too slow to be useful as I can imagine. 
+     Looping in Python is horriblly slow as we know it
+     and we use iterators to yield values, plus slow posix semaphores.
 
+   4 forloop returns the iterator for the variable if ordered == False
+     forloop returns the iterator variable and an Ordered object if
+     ordered==True.
 
-class SlaveMonitor:
-    def __init__(self, errormon):
-        self.children = []
-        self.errormon = errormon
+   5 DeadLocks: 
+        Tested pretty extensively, but 
+        there still may be some corner cases. 
 
-    def main(self):
-        n = 0
-        N = len(self.children)
-        while n < N:
-            pid, status = os.wait()
-            n = n + 1
-            self.children.remove(pid)
-            if status != 0 and status != - signal.SIGTRAP:
-                self.errormon.slaveraise(ParallelException, 
-                ParallelException("slave %d died unexpected" % pid), None)
-    def notechild(self, pid):
-        self.children.append(pid)
-    def start(self):
-        self.thread = Thread(target=self.main)
-        self.thread.start()
+        Biggest bunch I have fixed are because we rely on
+        an asynchronized Exception(AE) to jump out of a parallel scope
+        when there are exceptions from slave processes.
+        In Python AE is unsafe, even with the new 'with' statement. 
 
-    def join(self):
-        """ master only """
-        self.thread.join()
-        self.thread = None
+        As a fix, we limit the AE only between __enter__ and __exit__,
+        and the only nontrivial object used is Semaphore. In case of
+        unprotected and failed Semaphore release, we release them one
+        more time from another thread, guareenteed to be safe from 
+        the AE we use (signal AE)
 
-class ErrorMonitor:
-    def __init__(self):
-        self.pipe = SimpleQueue()
-        self.message = None
+   
 
-    def main(self):
-        while True:
-            message = self.pipe.get()
-            if message[0] == 'Q':
-                break
-            else:
-                if self.message is None:
-                    self.message = message[1:]
-                    Break.notify_all()
-                    
-    def haserror(self):
-        """ master only """
-        return self.message is not None
-    def start(self):
-        """ master only """
-        self.thread = Thread(target=self.main)
-        self.thread.start()
-    def join(self):
-        """ master only """
-        self.pipe.put('Q')
-        self.thread.join()
-        self.thread = None
-
-    def slaveraise(self, type, error, traceback):
-        """ slave only """
-        message = 'E' + pickle.dumps((type,
-            ''.join(tb.format_exception(type, error, traceback))))
-        self.pipe.put(message)
-
-
-class Parallel(object):
-    """
-
-        **kwargs: 
-             num_threads: number of processes (default to OMP_NUM_THREADS)
-
-        *args:
-            Private(name=value, ....)
-            Shared(name=value, ....)
-            Reduction(ufunc, name=value, ....)
+   Comparing similiar features between Parallel and OpenMP standard:
 
         Parallel               vs  openmp construct
 
@@ -163,6 +67,177 @@ class Parallel(object):
                     xxxx
             with p.critical:                 omp critical
                 xxxx 
+"""
+import numpy
+import traceback as tb
+import signal
+import time
+import os 
+import backends
+import pickle
+import signal
+
+from multiprocessing import Lock
+from multiprocessing.synchronize import Semaphore
+from multiprocessing.queues import SimpleQueue
+from threading import Thread
+from memory import empty
+
+__all__ = ['Parallel', 'ParallelException']
+class ParallelException(Exception):
+    """When a Slave process is unexpectedly killed (by the OS, eg, OOM)"""
+    pass
+
+class LongJump(BaseException):
+    """Convert SIGTRAP to an python exception so that the
+       parallel section will jump to __exit__.
+
+       We use SIGTRAP to notify the master and slave that an exception
+       has occured. 
+
+       A slave process that received SIGTRAP will exit immediately.
+       (We rely on the OS for that)
+
+       LongJump is called by errormon upon detection of an error.
+       (ran in errormon context)
+
+       Python signal handler is executed at the 'next' python 
+       executation point after the signal is received.
+
+       To ensure master jumps to __exit__ we make sure the code runs
+       to the next bytecode asap by 
+       We forcefully release all Semaphores, after ensuring all slaves
+       are killed.
+    """
+    muted = False
+    parallel = None
+    @staticmethod
+    def handler(a, b):
+        tb = []
+        while b is not None:
+            tb.append('%d %s %d' % (b.f_lineno, b.f_code.co_filename,
+                os.getpid()))
+            b = b.f_back
+        raise LongJump('\n'.join(tb))
+    @classmethod
+    def listen(kls, parallel):
+        kls.parallel = parallel
+        signal.signal(signal.SIGTRAP, kls.handler)
+        kls.muted = False
+    @classmethod
+    def mute(kls):
+        if not kls.muted:
+            kls.muted = True
+            signal.signal(signal.SIGTRAP, signal.SIG_IGN)
+    @staticmethod
+    def longjump():
+        LongJump.parallel._slavemon.kill_all()
+        # first kill slaves, then master
+        os.kill(os.getpid(), signal.SIGTRAP)
+
+        # this line will always run becuase
+        # longjump is called from non-main thread
+        # signal is trapped on main-thread.
+        # will will ensure all Semaphores are released
+        # so that the master won't stuck
+        # as all slaves are dead, we just need to
+        # increase the semaphores enough to raise the master
+        LongJump.parallel._cleanup()
+
+
+class SlaveMonitor:
+    def __init__(self, errormon):
+        self.children = []
+        self.errormon = errormon
+
+    def main(self):
+        n = 0
+        N = len(self.children)
+        while n < N:
+            pid, status = os.wait()
+            n = n + 1
+            self.children.remove(pid)
+            if status != 0 and status != signal.SIGTRAP:
+                self.errormon.slaveraise(ParallelException, 
+                        ParallelException("slave %d died unexpected: %d" % (pid,
+                            status)), None)
+    def notechild(self, pid):
+        self.children.append(pid)
+    def kill_all(self):
+        """kill all slaves and reap the monitor """
+        for pid in self.children:
+            try:
+                os.kill(pid, signal.SIGTRAP)
+            except OSError:
+                continue
+        self.join()
+
+    def start(self):
+        self.thread = Thread(target=self.main)
+        self.thread.daemon = True
+        self.thread.start()
+
+    def join(self):
+        """ master only """
+        try:
+            self.thread.join()
+        except:
+            pass
+        finally:
+            self.thread = None
+
+class ErrorMonitor:
+    def __init__(self):
+        self.pipe = SimpleQueue()
+        self.message = None
+
+    def main(self):
+        while True:
+            message = self.pipe.get()
+            if message != 'Q':
+                self.message = message[1:]
+                LongJump.longjump()
+                break
+            else:
+                self.pipe = None
+                break
+                    
+    def haserror(self):
+        """ master only """
+        return self.message is not None
+    def start(self):
+        """ master only """
+        self.thread = Thread(target=self.main)
+        self.thread.daemon = True
+        self.thread.start()
+    def join(self):
+        """ master only """
+        try:
+            self.pipe.put('Q')
+            self.thread.join()
+        except:
+            pass
+        finally:
+            self.thread = None
+
+    def slaveraise(self, type, error, traceback):
+        """ slave only """
+        message = 'E' * 1 + pickle.dumps((type,
+            ''.join(tb.format_exception(type, error, traceback))))
+        if self.pipe is not None:
+            self.pipe.put(message)
+
+
+class Parallel(object):
+    """
+
+        **kwargs: 
+             num_threads: number of processes (default to OMP_NUM_THREADS)
+
+        *args:
+            Private(name=value, ....)
+            Shared(name=value, ....)
+            Reduction(ufunc, name=value, ....)
 
     """
     def __init__(self, *args, **kwargs):
@@ -186,15 +261,15 @@ class Parallel(object):
                 self.rank = i + 1
                 self.master = False
 
-    def cleanup(self):
-        if self.master:
-            self._barrier.abort()
-            self.critical.release()
-            self._StaticForLoop.abort()
-            self._DynamicForLoop.abort()
-            self._Ordered.abort()
+    def _cleanup(self):
+        self._barrier.abort()
+        self.critical.release()
+        self._StaticForLoop.abort()
+        self._DynamicForLoop.abort()
+        self._Ordered.abort()
+
     def __enter__(self):
-        self.critical = Semaphore()
+        self.critical = Semaphore(1)
         self._errormon = ErrorMonitor() 
         self._slavemon = SlaveMonitor(self._errormon) 
         shared = empty((),
@@ -207,8 +282,7 @@ class Parallel(object):
         self._barrier = Barrier(self.num_threads, shared['barrier'][...])
         self._Ordered = MetaOrdered(self, shared['ordered'] [...], Semaphore(1))
         self._StaticForLoop = MetaStaticForLoop(self) 
-        self._debugmutex = Semaphore(1)
-        self._DynamicForLoop = MetaDynamicForLoop(self, self._debugmutex, shared['dynamic'][...]) 
+        self._DynamicForLoop = MetaDynamicForLoop(self, Semaphore(1), shared['dynamic'][...]) 
 
         for param in self._variables:
             param.beforefork(self)
@@ -218,31 +292,57 @@ class Parallel(object):
         if self.master:
             self._errormon.start()
             self._slavemon.start()
-        Break.listen(self.cleanup)
+            LongJump.listen(self)
         return self
 
+    def __exitmaster__(self, type, exception, traceback):
+        if type is None:
+            # if any slaves raise error
+            # _erromon will kill them
+            # but master won't receive the LongJump signal
+            self._slavemon.join()
+            self._errormon.join()
+            if self._errormon.message is not None:
+                type, msg = pickle.loads(self._errormon.message)
+                raise type, msg
+        elif type is LongJump:
+            self._errormon.join()
+            type, msg = pickle.loads(self._errormon.message)
+            raise type, msg
+        else:
+            self._slavemon.kill_all()
+            self._errormon.join()
+
+        for param in self._variables:
+            if isinstance(param, Reduction):
+                param.reduce(self)
+
     def __exit__(self, type, exception, traceback):
-        Break.mute()
-        if not self.master: 
+        try:
+            # since we are already here,
+            # mute further longjumps that
+            # may corrupt the unprotected
+            # internal implementations.
+            # example
+            # if Thread.join() is inproperly
+            # break by a async exception
+            # next call to Thread.start() may block
+            LongJump.mute()
+            # if LongJump is raised 
+            # we simply try again
+        except LongJump as e:
+            LongJump.mute()
+
+        if self.master: 
+            self.__exitmaster__(type, exception, traceback)
+        else:
             # put error to the pipe
-            if type is not None and type is not Break:
+            if type is not None:
                 # need to make sure each (per) message 
                 # won't block the pipe!
                 self._errormon.slaveraise(type, exception, traceback)
             os._exit(0)
-        else:
-            self._slavemon.join()
-            self._errormon.join()
-            if type is not None and type is not Break:
-                Break.notify_all()
-
-            if self._errormon.message is not None:
-                type, msg = pickle.loads(self._errormon.message)
-                raise type, msg
-
-            for param in self._variables:
-                if isinstance(param, Reduction):
-                    param.reduce(self)
+        
     def barrier(self):
         self._barrier.wait()
 
@@ -281,9 +381,10 @@ class Barrier:
 
     def abort(self):
         """ ensure the master exit from Barrier """
-        [self.mutex.release() for i in range(self.n)]
-        [self.turnstile.release() for i in range(self.n)]
-        [self.turnstile2.release() for i in range(self.n)]
+        self.mutex.release()
+        self.turnstile.release()
+        self.mutex.release()
+        self.turnstile2.release()
 
     def phase1(self):
         try:
@@ -330,8 +431,9 @@ def MetaDynamicForLoop(parallel, mutex, dynamiciter):
             # make sure dynamiciter is updated to 0
             parallel.barrier()
 
+        @classmethod
         def abort(self):
-            [mutex.release() for i in range(parallel.num_threads)]
+            mutex.release()
 
         def __iter__(self):
             N = len(self.range)
@@ -381,7 +483,8 @@ def MetaStaticForLoop(parallel):
                 self.ordered = parallel._Ordered(self.iter)
             else:
                 self.ordered = None
-        def abort(self):
+        @classmethod
+        def abort(kls):
             pass
         def __iter__(self):
             for i in range(self.start, self.end):
@@ -404,6 +507,7 @@ def MetaOrdered(parallel, done, turnstile):
             self.iterref = iterref
             parallel.barrier()
 
+        @classmethod
         def abort(self):
             turnstile.release()
 
@@ -458,18 +562,28 @@ class VarSet(object):
         self.data[index][...] = value
 
 class Shared(VarSet):
+    """A set of shared variables.
+       
+       Shared(varname=value)
+       if specific type is needed, eg, int8, 
+       use numpy.int8.
+    """
     def beforefork(self, parallel):
         self.data = empty((), self._dtype)
         for key, value in self._input:
             self.data[key] = value
 
 class Private(VarSet):
+    """A set of private variables"""
     def beforefork(self, parallel):
         self.data = numpy.empty((), self._dtype)
         for key, value in self._input:
             self.data[key] = value
 
 class Reduction(VarSet):
+    """A set of reduction variables
+        all variables will be reduced by the same ufunc
+    """
     def __init__(self, ufunc, **kwargs):
         self._ufunc = ufunc
         VarSet.__init__(self, **kwargs)
@@ -591,7 +705,7 @@ def testbarrier():
             Shared(a=[0, 0]),
             Reduction(numpy.add, b=[0, 0])
             ) as p:
-        time.sleep(p.rank * 0.01)
+        #time.sleep(p.rank * 0.01)
         p.barrier()
         p.barrier()
         
@@ -601,7 +715,7 @@ def testkill():
                 Shared(a=[0, 0]),
                 Reduction(numpy.add, b=[0, 0])
                 ) as p:
-            time.sleep(p.rank * 0.01)
+        #    time.sleep(p.rank * 0.01)
             p.barrier()
 
             if p.rank == p.num_threads - 1:
@@ -616,23 +730,23 @@ def testkill():
 
 def main():
     testkill()
-    print 'kill done'
+    #print 'kill done'
     for i in range(100):
         print 'run', i
-        #testdynamicordered()
-        print 'guidedordered'
-        #testguidedordered()
-        print 'reduction'
-        #testreduction()
-        #print 'private'
-        #testprivate()
-        print 'shared'
-        #testshared()
-        print 'bairer'
-        #testbarrier()
-        print 'raisecritical'
-        #testraisecritical()
-        print 'raiseordered'
+        testdynamicordered()
+   #     print 'guidedordered'
+        testguidedordered()
+   #     print 'reduction'
+        testreduction()
+   #     print 'private'
+        testprivate()
+   #     print 'shared'
+        testshared()
+   #     print 'bairer'
+        testbarrier()
+   #     print 'raisecritical'
+        testraisecritical()
+   #     print 'raiseordered'
         testraiseordered()
         print 'done', i
     print 'all done'

@@ -6,10 +6,19 @@ which are the parallel equivalent of numpy.argsort() and numpy.fromfile().
 Environment variable OMP_NUM_THREADS is used to determine the
 default number of Slaves.
 
-What's Unique about sharedmem?
+Two major components:
 
-sharedmem.Pool is a hybrid of Map-Reduce and OpenMP parallel For, so
-there are the goodies from both functional and procedural protocals:
+sharedmem.MapReduce and sharedmem.Parallel.
+
+sharedmem.MapReduce is a hybrid of Map-Reduce and OpenMP parallel For, so
+there are the goodies from both functional and procedural protocals.
+
+sharedmem.Parallel is an incomplete implemenation of OpenMP with
+multi-processaing (not with the multiprocessing module). This is experimental
+and not well tested. parallel, forloop, barrier, master, critical, ordered are
+implemented.
+
+sharedmem.MapReduce has the following features:
 
 1 Thread local storage regardless of backend(Thread or Process),
    just have to save attributes to 
@@ -56,18 +65,12 @@ there are the goodies from both functional and procedural protocals:
   SharedMem segments are useful for communicating large chunk of 
   data from Slaves to Master.
 
-Exception handling:
-
-  The Exception from a Slave is collected by the master, with stack
-  backtrace as a string. Upon the retrieval of the exception, master
-  asks all Slaves to die, then rethrows the exception.
 
 Debugging:
-
   It is difficult to debug parallel code. There is a debugging mode
   where everything is run from the Master, and can be debugged.
 
-sharedmem.set_debug(True)
+    sharedmem.set_debug(True)
 
 Backends:
   sharedmem has 2 parallel backends: Process and Threads.
@@ -82,15 +85,13 @@ Backends:
       are not fully GIL aware. Scipy uses some libraries that
       are very thread unfriendly. 
     * Modification to contents of variables shows up in Master.
-    * Need to be very careful. Avoid in general.
+    * Need to be very careful. Avoid using it in general.
 
 Other Tools:
   * Sorting:
       A Parallel merge-sort with argsort. It uses a lot of memory.
       Use when appropriate.
 
-  * experimental OpenMP like parallel sections. It's an abuse to python
-    decorators. Do not use.
 
   
 
