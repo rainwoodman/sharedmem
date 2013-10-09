@@ -99,26 +99,29 @@ class MapReduce(object):
         # we run fetcher on main thread to catch exceptions
         # raised by reduce 
         count = 0
-        while pg.is_alive():
-            try:
-                capsule = R.get(timeout=1)
-            except queue.Empty:
-                continue
-            capsule = capsule[0], realreduce(capsule[1])
-            heapq.heappush(L, capsule)
-            count = count + 1
-            if len(N) > 0 and count == N[0]: 
-                # if finished feeding see if all
-                # results have been obtained
-                break
-        rt = []
-        while len(L) > 0:
-            rt.append(heapq.heappop(L)[1])
+        try:
+            while pg.is_alive():
+                try:
+                    capsule = R.get(timeout=1)
+                except queue.Empty:
+                    continue
+                capsule = capsule[0], realreduce(capsule[1])
+                heapq.heappush(L, capsule)
+                count = count + 1
+                if len(N) > 0 and count == N[0]: 
+                    # if finished feeding see if all
+                    # results have been obtained
+                    break
+            rt = []
+            while len(L) > 0:
+                rt.append(heapq.heappop(L)[1])
+            pg.join()
+            feeder.join()
+            return rt
+        except Exception as e:
+            pg.Errors.put([e, ''])
+            raise 
 
-        pg.join()
-        feeder.join()
-
-        return rt
 def main2():
     import time
     import os

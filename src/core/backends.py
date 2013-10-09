@@ -95,7 +95,7 @@ class ProcessGroup(object):
         for p in self.P:
             if not p.is_alive(): continue
             if isinstance(p, threading.Thread): p.join()
-            else: p.terminate()
+            else: p._popen.send_signal(2)
 
     def _guardMain(self):
         Nalive = sum([p.is_alive() for p in self.P])
@@ -106,7 +106,7 @@ class ProcessGroup(object):
             p.join(timeout=1)
             if p.is_alive(): q.append(p)
             if isinstance(p, threading.Thread): continue
-            unexpected = sum([p.exitcode < 0 \
+            unexpected = sum([p.exitcode < 0 and p.exitcode != -2 \
                     for p in self.P if not p.is_alive()])
             if unexpected > 0:
                 e = Exception("slave process killed by signal %s" %
