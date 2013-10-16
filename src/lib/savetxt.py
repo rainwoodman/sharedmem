@@ -4,17 +4,21 @@
     also supports nested datatypes.
 
 """
+__all__ = ['savetxt2', 'loadtxt2']
+
 import numpy
 import re
 import base64
 import pickle
 import shlex
 def savetxt2(fname, X, delimiter=' ', newline='\n', comment_character='#',
-        fmt={}):
+        header='', save_dtype=False, fmt={}):
 
-    """ format of header:
+    """ format of table header:
 
-        ID [type]:name(index) .... * number of items
+        # ID [type]:name(index) .... * number of items
+
+        user's header is not prefixed by comment_character
 
         name of nested dtype elements are split by .
     """
@@ -23,28 +27,33 @@ def savetxt2(fname, X, delimiter=' ', newline='\n', comment_character='#',
             prefixfmt[key] = fmt[key]
 
     olddtype = X.dtype
-    X = X.view(dtype=flatten_dtype(X.dtype))
+    newdtype = flatten_dtype(numpy.dtype([('', (X.dtype, X.shape[1:]))]))
+    X = X.view(dtype=newdtype)
     dtype = X.dtype
-    header = _mkheader(dtype)
+    X = numpy.atleast_1d(X.squeeze())
+    header2 = _mkheader(dtype)
     fmtstr = _mkfmtstr(dtype, prefixfmt, delimiter, _default_fmt)
-
     if hasattr(fname, 'write'):
         fh = fname
         cleanup = lambda : None
     else:
-        fh = file(fh, 'w+')
+        fh = file(fname, 'w+')
         cleanup = lambda : fh.close()
     try:
+        fh.write (header)
+        if header[:-1] != newline:
+            fh.write(newline)
         fh.write (comment_character)
         fh.write ('!')
-        fh.write (header)
+        fh.write (header2)
         fh.write (delimiter)
         fh.write ('*%d' % len(X))
         fh.write(newline)
-        fh.write (comment_character)
-        fh.write ('?')
-        fh.write (base64.b64encode(pickle.dumps(olddtype)))
-        fh.write (newline)
+        if save_dtype:
+            fh.write (comment_character)
+            fh.write ('?')
+            fh.write (base64.b64encode(pickle.dumps(olddtype)))
+            fh.write (newline)
         for row in X:
             fh.write(fmtstr % tuple(row))
             fh.write(newline)
@@ -54,46 +63,53 @@ def savetxt2(fname, X, delimiter=' ', newline='\n', comment_character='#',
     finally:
         cleanup()
     
-def loadtxt2(fname, delimiter=' ', newline='\n', comment_character='#',
+def loadtxt2(fname, dtype=None, delimiter=' ', newline='\n', comment_character='#',
         skiplines=0):
     """ Known issues delimiter and newline is not respected. 
         string quotation with space is broken.
     """
     dtypert = [None, None, None]
+    def preparedtype(dtype):
+        dtypert[0] = dtype
+        flatten = flatten_dtype(dtype)
+        dtypert[1] = flatten
+        dtypert[2] = numpy.dtype([('a', (numpy.int8,
+            flatten.itemsize))])
+        buf = numpy.empty((), dtype=dtypert[1])
+        converters = [_default_conv[flatten[name].char] for name in flatten.names]
+        return buf, converters, flatten.names
+
     def fileiter(fh):
-        dtype = None
-        flatten = None
         converters = []
         buf = None
+
+        if dtype is not None:
+            buf, converters, names = preparedtype(dtype)
+            yield None
+
         for lineno, line in enumerate(fh):
             if lineno < skiplines: continue
             if line[0] in comment_character:
-                if line[1] == '?':
-                    dtype = pickle.loads(base64.b64decode(line[2:]))
-                    dtypert[0] = dtype
-                    flatten = flatten_dtype(dtype)
-                    dtypert[1] = flatten
-                    dtypert[2] = numpy.dtype([('a', (numpy.int8,
-                        flatten.itemsize))])
-                    buf = numpy.empty((), dtype=flatten)
-                    converters = [_default_conv[flatten[name].char] for name in flatten.names]
+                if buf is None and line[1] == '?':
+                    ddtype = pickle.loads(base64.b64decode(line[2:]))
+                    buf, converters, names = preparedtype(ddtype)
                     yield None
                 continue
-            for word, c, name in zip(line.split(), converters, flatten.names):
+            for word, c, name in zip(line.split(), converters, names):
                 buf[name] = c(word)
             buf2 = buf.copy().view(dtype=dtypert[2])
             yield buf2
 
-    if hasattr(fname, 'read'):
-        fh = fname
-        cleanup = lambda : None
-    else:
+    if isinstance(fname, basestring):
         fh = file(fh, 'r')
         cleanup = lambda : fh.close()
+    else:
+        fh = iter(fname)
+        cleanup = lambda : None
     try:
-        iter = fileiter(fh)
-        iter.next()
-        return numpy.fromiter(iter, dtype=dtypert[2]).view(dtype=dtypert[0]) 
+        i = fileiter(fh)
+        i.next()
+        return numpy.fromiter(i, dtype=dtypert[2]).view(dtype=dtypert[0]) 
     finally:
         cleanup()
 
@@ -109,9 +125,14 @@ def test():
     a['d']['e'][0] = [1, 2, 3, 4, 5]
     a['d']['e'][1] = [1, 2, 3, 4, 5]
     s = StringIO()
-    savetxt2(s, a, fmt=dict([('a', '0x%.8X'), ('d.e', '%.8d')]))
+    savetxt2(s, a, fmt=dict([('a', '0x%.8X'), ('d.e', '%.8d')]), save_dtype=True)
     print s.getvalue()
     print loadtxt2(StringIO(s.getvalue()))
+    print loadtxt2(StringIO(s.getvalue()), dtype=d)
+    s = StringIO()
+    array = numpy.arange(10).reshape(2, 5)
+    savetxt2(s, array)
+    print s.getvalue()
 
 def _mkheader(dtype):
     return ' '.join(
@@ -212,13 +233,18 @@ def flatten_dtype(dtype, _next=None):
     
 _default_fmt = {
         'f': '%g'        ,
+        'd': '%g'        ,
+        'b': '%d'        ,
+        'B': '%d'        ,
         'i': '%d'        ,
         'I': '%d'        ,
+        'l': '%d'        ,
         'L': '%d'        ,
         'S': '"%s"'        ,
 }
 _default_conv = {
         'f': float        ,
+        'd': float        ,
         'i': lambda x: long(x, base=0),
         'L': lambda x: long(x, base=0),
         'I': lambda x: long(x, base=0),

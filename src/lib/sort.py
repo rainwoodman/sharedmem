@@ -89,7 +89,7 @@ def argsort(data, out=None, chunksize=None,
     flip = 0
     while len(CHK) > 1:
         with sharedmem.TPool() as pool:
-            CHK = pool.starmap(work, zip(CHK[::2], CHK[1::2]))
+            CHK = pool.map(work, zip(CHK[::2], CHK[1::2]), star=True)
             arg1, arg2 = arg2, arg1
             flip = flip + 1
         if len(CHK) == 1: break

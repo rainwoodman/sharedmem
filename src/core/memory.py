@@ -21,6 +21,9 @@ def copy(a):
   shared[:] = a[:]
   return shared
 
+def fromiter(iter, dtype, count=None):
+    return copy(numpy.fromiter(iter, dtype, count))
+
 def __unpickle__(ai, dtype):
   dtype = numpy.dtype(dtype)
   tp = numpy.ctypeslib._typecodes['|u1']
