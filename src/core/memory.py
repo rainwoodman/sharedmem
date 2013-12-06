@@ -7,7 +7,7 @@ __all__ = ['empty', 'empty_like', 'copy']
 
 def empty_like(array, dtype=None):
   if dtype is None: dtype = array.dtype
-  return anonymousmemmap(array.shape, dtype)
+  return anonymousmemmap(numpy.broadcast(array, array).shape, dtype)
 
 def empty(shape, dtype='f8'):
   """ allocates an empty array on the shared memory """
@@ -39,21 +39,19 @@ def __unpickle__(ai, dtype):
   buffer = numpy.ctypeslib.as_array(ra).ravel()
   # view it as what it should look like
   shm = numpy.ndarray(buffer=buffer, dtype=dtype, 
-      strides=ai['strides'], shape=ai['shape']).view(type=anonymousememmap)
+      strides=ai['strides'], shape=ai['shape']).view(type=anonymousmemmap)
   return shm
 
 def __pickle__(obj):
   return obj.__reduce__()
 
 class anonymousmemmap(numpy.memmap):
-    __array_priority__ = -100.0
     def __new__(subtype, shape, dtype=numpy.uint8, order='C'):
 
         descr = numpy.dtype(dtype)
         _dbytes = descr.itemsize
 
-        if not isinstance(shape, tuple):
-            shape = (shape,)
+        shape = numpy.atleast_1d(shape)
         size = 1
         for k in shape:
             size *= k
@@ -66,8 +64,15 @@ class anonymousmemmap(numpy.memmap):
         self._mmap = mm
         return self
 
+    def __array_wrap__(self, outarr, context=None):
+    # after ufunc this won't be on shm!
+        return numpy.ndarray.__array_wrap__(self.view(numpy.ndarray), outarr, context)
+
     def __reduce__(self):
-        return __unpickle__, (self.__array_interface__, self.dtype)
+        if hasattr(self, '_mmap'):
+            return __unpickle__, (self.__array_interface__, self.dtype)
+        else:
+            return numpy.ndarray.__reduce__(self)
 
 copy_reg.pickle(anonymousmemmap, __pickle__, __unpickle__)
 

@@ -59,7 +59,7 @@ class MapReduce(object):
             if star: return func(*i)
             else: return func(i)
 
-        if self.np == 0:
+        if self.np == 0 or backends.get_debug():
             #Do this in serial
             return [realreduce(realfunc(i)) for i in sequence]
 

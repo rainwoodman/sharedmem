@@ -94,8 +94,12 @@ class ProcessGroup(object):
     def killall(self):
         for p in self.P:
             if not p.is_alive(): continue
-            if isinstance(p, threading.Thread): p.join()
-            else: p._popen.send_signal(2)
+            try:
+                if isinstance(p, threading.Thread): p.join()
+                else: os.kill(p._popen.pid, 5)
+            except Exception as e:
+                print e
+                continue
 
     def _guardMain(self):
         Nalive = sum([p.is_alive() for p in self.P])

@@ -12,7 +12,9 @@ class background(object):
 
         rt = bg.wait()
     """
-    def __init__(self, function, backend=backends.ProcessBackend, *args, **kwargs):
+    def __init__(self, function, *args, **kwargs):
+            
+        backend = kwargs.pop('backend', backends.ProcessBackend)
 
         self.result = backend.QueueFactory(1)
         self.slave = backend.SlaveFactory(target=self.closure, 

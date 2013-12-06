@@ -1,3 +1,3 @@
-from array import *
+import array
 from sort import *
 from savetxt import *
