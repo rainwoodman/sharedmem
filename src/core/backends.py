@@ -38,6 +38,9 @@ def cpu_count():
       OMP_NUM_THREADS is used because if you hybrid sharedmem with
       some openMP extenstions one environment will do it all.
 
+      On PBS/torque systems if OMP_NUM_THREADS is empty, we try to
+      use the value of PBS_NUM_PPN variable.
+
       on some machines the physical number of cores does not equal
       the number of cpus shall be used. PSC Blacklight for example.
 
@@ -45,6 +48,8 @@ def cpu_count():
       in Pool.
   """
   num = os.getenv("OMP_NUM_THREADS")
+  if num is None:
+      num = os.getenv("PBS_NUM_PPN")
   try:
     return int(num)
   except:
