@@ -14,6 +14,7 @@ def test1():
     now = time.time()
     assert re.wait() == True
     assert int(time.time() - now + 0.5) == 3
+    print 'test1' 
 
 def test2():
     re = background(function2)

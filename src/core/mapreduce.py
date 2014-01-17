@@ -24,7 +24,7 @@ class MapReduce(object):
         # the exception is muted in ProcessGroup,
         # as it will only be dispatched from master.
         while True:
-            capsule = pg.get(Q, reraise=False)
+            capsule = pg.get(Q)
             if capsule is None:
                 return
             if len(capsule) == 1:
@@ -34,7 +34,7 @@ class MapReduce(object):
                 i, work = capsule
             self.ordered.move(i)
             r = realfunc(work)
-            pg.put(R, (i, r), reraise=False)
+            pg.put(R, (i, r))
 
 
     def __enter__(self):
@@ -63,8 +63,8 @@ class MapReduce(object):
             #Do this in serial
             return [realreduce(realfunc(i)) for i in sequence]
 
-        Q = self.backend.QueueFactory(1)
-        R = self.backend.QueueFactory(1)
+        Q = self.backend.QueueFactory(64)
+        R = self.backend.QueueFactory(64)
         self.ordered.reset()
 
         pg = backends.ProcessGroup(main=self.main, np=self.np,
@@ -81,18 +81,18 @@ class MapReduce(object):
             try:
                 for i, work in enumerate(sequence):
                     if not hasattr(sequence, '__getitem__'):
-                        pg.put(Q, (i, work), reraise=False)
+                        pg.put(Q, (i, work))
                     else:
-                        pg.put(Q, (i, ), reraise=False)
+                        pg.put(Q, (i, ))
                     j = j + 1
                 N.append(j)
 
                 for i in range(self.np):
-                    pg.put(Q, None, reraise=False)
-            except:
+                    pg.put(Q, None)
+            except backends.StopProcessGroup:
                 return
-        
-
+            finally:
+                pass
         feeder = threading.Thread(None, feeder, args=(pg, Q, N))
         feeder.start() 
 
@@ -100,11 +100,13 @@ class MapReduce(object):
         # raised by reduce 
         count = 0
         try:
-            while pg.is_alive():
+            while True:
                 try:
-                    capsule = R.get(timeout=1)
+                    capsule = pg.get(R)
                 except queue.Empty:
                     continue
+                except backends.StopProcessGroup:
+                    raise pg.get_exception()
                 capsule = capsule[0], realreduce(capsule[1])
                 heapq.heappush(L, capsule)
                 count = count + 1
@@ -113,13 +115,18 @@ class MapReduce(object):
                     # results have been obtained
                     break
             rt = []
+#            R.close()
+#            R.join_thread()
             while len(L) > 0:
                 rt.append(heapq.heappop(L)[1])
             pg.join()
             feeder.join()
+            assert N[0] == len(rt)
             return rt
-        except Exception as e:
-            pg.Errors.put([e, ''])
+        except BaseException as e:
+            pg.killall()
+            pg.join()
+            feeder.join()
             raise 
 
 def main2():

@@ -71,25 +71,28 @@ def argsort(data, out=None, chunksize=None,
     DUMMY = slice(len(data), len(data))
     if len(CHK) % 2: CHK.append(DUMMY)
     with sharedmem.TPool() as pool:
-        def work(C):
+        def work(i):
+            C = CHK[i]
             start, stop, step = C.indices(len(data))
             arg1[C] = baseargsort(data[C])
             arg1[C] += start
-        pool.map(work, CHK)
+        pool.map(work, range(len(CHK)))
   
     arg2 = numpy.empty_like(arg1)
   
-    def work(C1, C2):
-        start1, stop1, step1 = C1.indices(len(data))
-        start2, stop2, step2 = C2.indices(len(data))
-#        print 'argmerge', start1, stop1, start2, stop2
-        assert start2 == stop1
-        argmerge(data, arg1[C1], arg1[C2], arg2[start1:stop2])
-        return slice(start1, stop2)
     flip = 0
     while len(CHK) > 1:
         with sharedmem.TPool() as pool:
-            CHK = pool.map(work, zip(CHK[::2], CHK[1::2]), star=True)
+            def work(i):
+                C1 = CHK[i]
+                C2 = CHK[i+1]
+                start1, stop1, step1 = C1.indices(len(data))
+                start2, stop2, step2 = C2.indices(len(data))
+        #        print 'argmerge', start1, stop1, start2, stop2
+                assert start2 == stop1
+                argmerge(data, arg1[C1], arg1[C2], arg2[start1:stop2])
+                return slice(start1, stop2)
+            CHK = pool.map(work, range(0, len(CHK), 2))
             arg1, arg2 = arg2, arg1
             flip = flip + 1
         if len(CHK) == 1: break

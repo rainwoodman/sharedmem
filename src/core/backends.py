@@ -4,6 +4,10 @@ import threading
 import Queue as queue
 from collections import deque
 import traceback
+import time
+
+#logger = multiprocessing.log_to_stderr()
+#logger.setLevel(multiprocessing.SUBDEBUG)
 
 __shmdebug__ = False
 __all__ = ['set_debug', 'get_debug', 'total_memory', 'cpu_count', 'ThreadBackend',
@@ -71,11 +75,23 @@ class ProcessGroup(object):
         self.main = main
         self.args = args
         self.guard = threading.Thread(target=self._guardMain)
+        self.errorguard = threading.Thread(target=self._errorGuard)
+        # this has to be from backend because the slaves will check
+        # this variable.
 
         self.guardDead = backend.EventFactory()
+        # each dead child releases one sempahore
+        # when all dead guard will proceed to set guarddead
+        self.semaphore = threading.Semaphore(0)
+        self.JoinedProcesses = multiprocessing.RawValue('l')
         self.P = [
             backend.SlaveFactory(target=self._slaveMain,
                 args=(rank,)) \
+                for rank in range(np)
+            ]
+        self.G = [
+            threading.Thread(target=self._slaveGuard,
+                args=(rank, self.P[rank])) \
                 for rank in range(np)
             ]
         return
@@ -90,10 +106,19 @@ class ProcessGroup(object):
             pass
         except BaseException as e:
             try:
+                print e
                 self.Errors.put((e, traceback.format_exc()), timeout=0)
             except queue.Full:
                 pass
         finally:
+#            self.Errors.close()
+#            self.Errors.join_thread()
+            # making all slaves exit one after another
+            # on some Linuxes if many slaves (56+) access
+            # mmap randomly the termination of the slaves
+            # run into a deadlock.
+            while self.JoinedProcesses.value < rank:
+                continue
             pass
 
     def killall(self):
@@ -106,28 +131,43 @@ class ProcessGroup(object):
                 print e
                 continue
 
-    def _guardMain(self):
-        Nalive = sum([p.is_alive() for p in self.P])
-        q = deque(self.P)
-        while self.Errors.empty() \
-          and len(q) > 0:
-            p = q.popleft()
-            p.join(timeout=1)
-            if p.is_alive(): q.append(p)
-            if isinstance(p, threading.Thread): continue
-            unexpected = sum([p.exitcode < 0 and p.exitcode != -2 \
-                    for p in self.P if not p.is_alive()])
-            if unexpected > 0:
-                e = Exception("slave process killed by signal %s" %
-                        str([-p.exitcode for p in self.P if not p.is_alive()]))
+    def _errorGuard(self):
+        # this guard will kill every child if
+        # an error is observed. We watch for this every 0.5 seconds
+        # (errors do not happen very often)
+        # if guardDead is set or killall is emitted, this will end immediately.
+        while not self.guardDead.is_set():
+            if not self.Errors.empty():
+                self.killall()
+                break
+            # for python 2.6.x wait returns None XXX
+            self.guardDead.wait(timeout=0.5)
+
+    def _slaveGuard(self, rank, process):
+        process.join()
+        if isinstance(process, threading.Thread):
+            pass
+        else:
+            if process.exitcode < 0 and process.exitcode != -5:
+                e = Exception("slave process %d killed by signal %d" % (rank, -
+                    process.exitcode))
                 try:
                     self.Errors.put((e, ""), timeout=0)
                 except queue.Full:
                     pass
-                self.killall()
+        self.semaphore.release() 
+
+    def _guardMain(self):
+        # this guard will wait till all children are dead.
+        # we then set the guardDead event
+        def waitone(x):
+            self.semaphore.acquire()
+            self.JoinedProcesses.value = self.JoinedProcesses.value + 1
+        map(waitone, self.G)
         self.guardDead.set()
 
     def start(self):
+        self.JoinedProcesses.value = 0
         self.guardDead.clear()
 
         map(lambda x: x.start(), self.P)
@@ -136,47 +176,52 @@ class ProcessGroup(object):
         # thus we can join them immediately after start returns.
         # guardMain will check if the slave has been
         # killed by the os, and simulate an error if so.
+        map(lambda x: x.start(), self.G)
+        self.errorguard.start()
         self.guard.start()
 
-    def get(self, Q, reraise=True):
-        """ get an item from Q,
-            if an error is detected, 
-                raise StopProcessGroup if reraise is False
-                reraise the detected Error if reraise if True
+    def get_exception(self):
+        return SlaveException(*self.Errors.get(timeout=0))
+
+    def get(self, Q):
+        """ Protected get. Get an item from Q.
+            Will block. but if the process group has errors,
+            raise an StopProcessGroup exception.
+
+            A slave process will terminate upon StopProcessGroup.
+            The master process shall read the error
         """
         while self.Errors.empty():
-            if not self.is_alive():
-                raise StopProcessGroup
             try:
                 return Q.get(timeout=1)
             except queue.Empty:
-                continue
+                if not self.is_alive():
+                    raise StopProcessGroup
+                else:
+                    continue
         else:
-            if reraise:
-                raise SlaveException(*self.Errors.get())
-            else:
-                raise StopProcessGroup
+            raise StopProcessGroup
 
-    def put(self, Q, item, reraise=True):
+    def put(self, Q, item):
         while self.Errors.empty():
-            if not self.is_alive():
-                raise StopProcessGroup
             try:
                 Q.put(item, timeout=1)
                 return
             except queue.Full:
-                continue
+                if not self.is_alive():
+                    raise StopProcessGroup
+                else:
+                    continue
         else:
-            if reraise:
-                raise SlaveException(*self.Errors.get())
-            else:
-                raise StopProcessGroup
+            raise StopProcessGroup
 
     def is_alive(self):
         return not self.guardDead.is_set()
 
     def join(self):
         self.guardDead.wait()
+        map(lambda x: x.join(), self.G)
+        self.errorguard.join()
         self.guard.join()
         if not self.Errors.empty():
             raise SlaveException(*self.Errors.get())
