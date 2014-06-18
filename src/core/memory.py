@@ -58,8 +58,10 @@ class anonymousmemmap(numpy.memmap):
 
         bytes = long(size*_dbytes)
 
-        mm = mmap.mmap(-1, bytes)
-
+        if bytes > 0:
+            mm = mmap.mmap(-1, bytes)
+        else:
+            mm = numpy.empty(0, dtype=descr)
         self = numpy.ndarray.__new__(subtype, shape, dtype=descr, buffer=mm, order=order)
         self._mmap = mm
         return self
