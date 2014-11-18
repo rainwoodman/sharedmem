@@ -5,7 +5,7 @@ import Queue as queue
 from collections import deque
 import traceback
 import time
-
+import gc
 #logger = multiprocessing.log_to_stderr()
 #logger.setLevel(multiprocessing.SUBDEBUG)
 
@@ -169,6 +169,11 @@ class ProcessGroup(object):
     def start(self):
         self.JoinedProcesses.value = 0
         self.guardDead.clear()
+
+        # collect the garbages before forking so that the left-over
+        # junk won't throw out assertion errors due to
+        # wrong pid in multiprocess.heap
+        gc.collect()
 
         map(lambda x: x.start(), self.P)
 
