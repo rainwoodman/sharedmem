@@ -1,0 +1,4 @@
+build/
+*.pyc
+*.so
+sharedmem/lib/_mergesort.c
