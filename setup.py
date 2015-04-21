@@ -7,7 +7,7 @@ setup(name="sharedmem", version="0.2",
       url="http://github.com/rainwoodman/sharedmem",
       download_url="http://web.phys.cmu.edu/~yfeng1/gaepsi/sharedmem-0.2.tar.gz",
       zip_safe=False,
-      package_dir = {'sharedmem': 'src'},
+      package_dir = {'sharedmem': 'sharedmem'},
       packages = [
         'sharedmem', 'sharedmem.core', 'sharedmem.lib'
       ],
@@ -15,7 +15,7 @@ setup(name="sharedmem", version="0.2",
       install_requires=['numpy'],
       ext_modules = [
         Extension('sharedmem.' + name, 
-             [ 'src/' + name.replace('.', '/') + '.c',],
+             [ 'sharedmem/' + name.replace('.', '/') + '.c',],
              extra_compile_args=['-O3'],
              libraries=[],
              include_dirs=[get_include()],
