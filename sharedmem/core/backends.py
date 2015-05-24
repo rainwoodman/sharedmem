@@ -106,8 +106,12 @@ class ProcessGroup(object):
             pass
         except BaseException as e:
             try:
-                print e
-                self.Errors.put((e, traceback.format_exc()), timeout=0)
+                # Put in the string version of the exception,
+                # Some of the Exception types in extension types are probably
+                # not picklable (thus can't be sent via a queue), 
+                # However, we don't use the extra information in customized
+                # Exception types anyways.
+                self.Errors.put((str(e), traceback.format_exc()), timeout=0)
             except queue.Full:
                 pass
         finally:
