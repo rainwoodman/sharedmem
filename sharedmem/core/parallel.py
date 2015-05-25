@@ -426,6 +426,8 @@ def MetaDynamicForLoop(parallel, mutex, dynamiciter):
                 self._haserror = lambda : False
             if ordered:
                 self.ordered = parallel._Ordered(self.iter)
+            else:
+                self.ordered = None
 
             # this is important, to
             # make sure dynamiciter is updated to 0
@@ -449,19 +451,19 @@ def MetaDynamicForLoop(parallel, mutex, dynamiciter):
                         if newchunk < self.chunk: 
                             newchunk = self.chunk
                     self.iter[...] = dynamiciter
-                    dynamiciter[...] += self.chunk
+                    dynamiciter[...] += newchunk
                 finally:
                     mutex.release()
 
                 if self.iter[...] >= N:
                     break
                 for i in range(newchunk):
-                    if self.iter + i >= N: break
+                    if self.iter >= N: break
                     if self.ordered is None:
-                        yield self.range[self.iter + i]
+                        yield self.range[self.iter]
                     else:
-                        yield self.range[self.iter + i], self.ordered
-
+                        yield self.range[self.iter], self.ordered
+                    self.iter[...] += 1
                 if self._haserror():
                     break
             self._haserror = None
@@ -604,100 +606,70 @@ class Reduction(VarSet):
         else:
             self.data = self._fulldata[0].view(type=Shared)
 
-def testdynamicordered():
-    try:
-        with Parallel(
-                Reduction(numpy.add, a=[0, 0])
-                ) as p:
-            for i, ordered in p.forloop(range(20), 
-                    ordered=True, schedule='dynamic'):
-                with ordered:
-                    p.var.a += numpy.array([i, i * 10])
-                    if i == 19:
-                        raise ValueError('raised at i == 19')
-        assert False
-    except ValueError as e:
-        return
-    assert False
-
-def testguidedordered():
-    try:
-        with Parallel(
-                Reduction(numpy.add, a=[0, 0])
-                ) as p:
-            for i, ordered in p.forloop(range(20), 
-                    ordered=True, schedule='guided'):
-
-                with ordered:
-                    p.var.a += numpy.array([i, i * 10])
-                    if i == 19:
-                        raise ValueError('raised at i == 19')
-        assert False
-    except ValueError as e:
-        return
-    assert False
-
-
 def testraiseordered():
-    try:
-        with Parallel(
-                Reduction(numpy.add, a=[0, 0])
-                ) as p:
-            for i, ordered in p.forloop(range(20), 
-                    ordered=True):
-                with ordered:
-                    p.var.a += numpy.array([i, i * 10])
-                    if i == 19:
-                        raise ValueError('raised at i == 19')
-        assert False
-    except ValueError as e:
-        return
-    assert False
+    for schedule in ['static', 'dynamic', 'guided']:
+        try:
+            with Parallel(
+                    Reduction(numpy.add, a=[0, 0])
+                    ) as p:
+                for i, ordered in p.forloop(range(20), 
+                        ordered=True, schedule=schedule):
+                    with ordered:
+                        p.var.a += numpy.array([i, i * 10])
+                        if i == 19:
+                            raise ValueError('raised at i == 19')
+            assert False
+        except ValueError as e:
+            pass
 
 def testraisecritical():
-    try:
+    for schedule in ['static', 'dynamic', 'guided']:
+        try:
+            with Parallel(
+                    Reduction(numpy.add, a=[0, 0])
+                    ) as p:
+                for i in p.forloop(range(20), schedule=schedule):
+                    with p.critical:
+                        p.var.a += numpy.array([i, i * 10])
+                        if i == 19:
+                            raise ValueError('raised at i == 19')
+            assert False
+        except ValueError as e:
+            pass
+
+def testreduction():
+    for schedule in ['static', 'dynamic', 'guided']:
         with Parallel(
                 Reduction(numpy.add, a=[0, 0])
                 ) as p:
-            for i in p.forloop(range(20)):
-                with p.critical:
-                    p.var.a += numpy.array([i, i * 10])
-                    if i == 19:
-                        raise ValueError('raised at i == 19')
-        assert False
-    except ValueError as e:
-        return
-    assert False
-def testreduction():
-    with Parallel(
-            Reduction(numpy.add, a=[0, 0])
-            ) as p:
-        for i in p.forloop(range(20)) :
-            p.var.a += numpy.array([i, i * 10])
-    assert (p.var.a == [190, 1900]).all()
+            for i in p.forloop(range(20), schedule=schedule) :
+                p.var.a += numpy.array([i, i * 10])
+        assert (p.var.a == [190, 1900]).all()
 
 def testprivate():
-    truevalue = numpy.zeros(2)
-    with Parallel(
-            Private(a=[0, 0])
-            ) as p:
-        for i in p.forloop(range(100)):
-            p.var.a += numpy.array([i, i * 10])
-            if p.master: 
-                truevalue += numpy.array([i, i * 10])
-    assert (p.var.a == truevalue).all()
+    for schedule in ['static', 'dynamic', 'guided']:
+        truevalue = numpy.zeros(2)
+        with Parallel(
+                Private(a=[0, 0])
+                ) as p:
+            for i in p.forloop(range(100), schedule=schedule):
+                p.var.a += numpy.array([i, i * 10])
+                if p.master: 
+                    truevalue += numpy.array([i, i * 10])
+        assert (p.var.a == truevalue).all()
 
 def testshared():
-    with Parallel(
-            Shared(a=[0, 0]),
-            Reduction(numpy.add, b=[0, 0])
-            ) as p:
-        for i in p.forloop(range(100)):
-            with p.critical:
-                p.var.a += numpy.array([i, i * 10])
-            p.var.b += numpy.array([i, i * 10]) 
-        
-    assert (p.var.a == p.var.b).all()
+    for schedule in ['static', 'dynamic', 'guided']:
+        with Parallel(
+                Shared(a=[0, 0]),
+                Reduction(numpy.add, b=[0, 0])
+                ) as p:
+            for i in p.forloop(range(100), schedule=schedule):
+                with p.critical:
+                    p.var.a += numpy.array([i, i * 10])
+                p.var.b += numpy.array([i, i * 10]) 
+            
+        assert (p.var.a == p.var.b).all()
 
 def testbarrier():
     now = time.time()
@@ -733,20 +705,16 @@ def main():
     #print 'kill done'
     for i in range(100):
         print 'run', i
-        testdynamicordered()
-   #     print 'guidedordered'
-        testguidedordered()
-   #     print 'reduction'
         testreduction()
-   #     print 'private'
+        print 'private'
         testprivate()
-   #     print 'shared'
+        print 'shared'
         testshared()
-   #     print 'bairer'
+        print 'bairer'
         testbarrier()
-   #     print 'raisecritical'
+        print 'raisecritical'
         testraisecritical()
-   #     print 'raiseordered'
+        print 'raiseordered'
         testraiseordered()
         print 'done', i
     print 'all done'
