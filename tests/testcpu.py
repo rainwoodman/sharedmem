@@ -1,15 +1,17 @@
+import unittest
+
 import numpy
 import sharedmem
 import time
 
-with sharedmem.Pool() as pool:
+with sharedmem.MapReduce() as pool:
     def work(i):
         time.sleep(0.2)
     now = time.time()
     pool.map(work, range(pool.np * 16))
     print('Pool took', time.time() - now)
 
-with sharedmem.TPool() as pool:
+with sharedmem.MapReduceByThread() as pool:
     def work(i):
         time.sleep(0.2)
     now = time.time()

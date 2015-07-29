@@ -2,7 +2,7 @@ import sharedmem
 import time
 import numpy
 def test():
-    with sharedmem.Pool() as pool:
+    with sharedmem.MapReduce() as pool:
         t = sharedmem.empty(100)
         def work(i):
             time.sleep(numpy.random.uniform())

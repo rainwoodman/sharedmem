@@ -5,7 +5,7 @@ import os
 import signal
 
 def test():
-    with sharedmem.Pool() as pool:
+    with sharedmem.MapReduce() as pool:
         def work(i):
             print('start', i)
             time.sleep(numpy.random.uniform())
