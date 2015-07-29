@@ -14,7 +14,7 @@ def test1():
     now = time.time()
     assert re.wait() == True
     assert int(time.time() - now + 0.5) == 3
-    print 'test1' 
+    print('test1' )
 
 def test2():
     re = background(function2)
@@ -22,7 +22,8 @@ def test2():
     try:
         assert re.wait() == True
     except Exception as e:
-        print e
-
+        print(e)
+        return 
+    assert False 
 test1()
 test2()

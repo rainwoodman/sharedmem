@@ -1,7 +1,11 @@
 import os
 import multiprocessing
 import threading
-import Queue as queue
+try:
+    import Queue as queue
+except ImportError:
+    import queue
+
 from collections import deque
 import traceback
 import time
@@ -132,7 +136,7 @@ class ProcessGroup(object):
                 if isinstance(p, threading.Thread): p.join()
                 else: os.kill(p._popen.pid, 5)
             except Exception as e:
-                print e
+                print(e)
                 continue
 
     def _errorGuard(self):
@@ -164,10 +168,10 @@ class ProcessGroup(object):
     def _guardMain(self):
         # this guard will wait till all children are dead.
         # we then set the guardDead event
-        def waitone(x):
+        for x in self.G:
             self.semaphore.acquire()
             self.JoinedProcesses.value = self.JoinedProcesses.value + 1
-        map(waitone, self.G)
+
         self.guardDead.set()
 
     def start(self):
@@ -179,18 +183,21 @@ class ProcessGroup(object):
         # wrong pid in multiprocess.heap
         gc.collect()
 
-        map(lambda x: x.start(), self.P)
+        for x in self.P:
+            x.start()
 
         # p is alive from the moment start returns.
         # thus we can join them immediately after start returns.
         # guardMain will check if the slave has been
         # killed by the os, and simulate an error if so.
-        map(lambda x: x.start(), self.G)
+        for x in self.G:
+            x.start()
         self.errorguard.start()
         self.guard.start()
 
     def get_exception(self):
-        return SlaveException(*self.Errors.get(timeout=0))
+        exp = self.Errors.get(timeout=0)
+        return SlaveException(*exp)
 
     def get(self, Q):
         """ Protected get. Get an item from Q.
@@ -229,7 +236,9 @@ class ProcessGroup(object):
 
     def join(self):
         self.guardDead.wait()
-        map(lambda x: x.join(), self.G)
+        for x in self.G:
+            x.join()
+
         self.errorguard.join()
         self.guard.join()
         if not self.Errors.empty():

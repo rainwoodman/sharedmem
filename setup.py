@@ -9,19 +9,20 @@ setup(name="sharedmem", version="0.2",
       zip_safe=False,
       package_dir = {'sharedmem': 'sharedmem'},
       packages = [
-        'sharedmem', 'sharedmem.core', 'sharedmem.lib'
+        'sharedmem', 'sharedmem.core' #, 'sharedmem.lib'
       ],
       requires=['numpy'],
       install_requires=['numpy'],
-      ext_modules = [
-        Extension('sharedmem.' + name, 
-             [ 'sharedmem/' + name.replace('.', '/') + '.c',],
-             extra_compile_args=['-O3'],
-             libraries=[],
-             include_dirs=[get_include()],
-             depends = extra
-        ) for name, extra in [
-         ('lib._mergesort', []),
-        ]
-      ])
+#      ext_modules = [
+#        Extension('sharedmem.' + name, 
+#             [ 'sharedmem/' + name.replace('.', '/') + '.c',],
+#             extra_compile_args=['-O3'],
+#             libraries=[],
+#             include_dirs=[get_include()],
+#             depends = extra
+#        ) for name, extra in [
+#         ('lib._mergesort', []),
+        #]
+#      ]
+)
 

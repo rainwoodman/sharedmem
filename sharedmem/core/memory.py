@@ -1,5 +1,9 @@
 import numpy
-import copy_reg
+try:
+    import copy_reg as copyreg
+except ImportError:
+    import copyreg
+
 from multiprocessing import RawArray
 import ctypes
 import mmap
@@ -56,7 +60,7 @@ class anonymousmemmap(numpy.memmap):
         for k in shape:
             size *= k
 
-        bytes = long(size*_dbytes)
+        bytes = int(size*_dbytes)
 
         if bytes > 0:
             mm = mmap.mmap(-1, bytes)
@@ -76,5 +80,5 @@ class anonymousmemmap(numpy.memmap):
         else:
             return numpy.ndarray.__reduce__(self)
 
-copy_reg.pickle(anonymousmemmap, __pickle__, __unpickle__)
+copyreg.pickle(anonymousmemmap, __pickle__, __unpickle__)
 

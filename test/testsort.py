@@ -1,3 +1,5 @@
+raise NotImplemented("sorting has been deprecated")
+
 import sharedmem
 
 import numpy

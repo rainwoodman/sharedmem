@@ -1,5 +1,5 @@
-from mapreduce import MapReduce
-import backends
+from .mapreduce import MapReduce
+from . import backends
 __all__ = ['Pool', 'TPool']
 
 class Pool(MapReduce):

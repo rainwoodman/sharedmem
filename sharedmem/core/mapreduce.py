@@ -1,9 +1,12 @@
-import backends
+from . import backends
 import threading
 import heapq
 import gc
 import os
-import Queue as queue
+try:
+    import Queue as queue
+except ImportError:
+    import queue
 __all__ = ['MapReduce', 'MapReduceByThread']
 
 def MapReduceByThread(np=None):
@@ -138,6 +141,6 @@ def main2():
     def work(i):
     #    with m.ordered:
     #        time.sleep(1)
-        print i
+        print(i)
         return i
-    print m.map(work, range(18))
+    print(m.map(work, range(18)))

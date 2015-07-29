@@ -73,7 +73,6 @@ import traceback as tb
 import signal
 import time
 import os 
-import backends
 import pickle
 import signal
 
@@ -81,7 +80,9 @@ from multiprocessing import Lock
 from multiprocessing.synchronize import Semaphore
 from multiprocessing.queues import SimpleQueue
 from threading import Thread
-from memory import empty
+
+from . import backends
+from .memory import empty
 
 __all__ = ['Parallel', 'ParallelException']
 class ParallelException(Exception):
@@ -304,11 +305,11 @@ class Parallel(object):
             self._errormon.join()
             if self._errormon.message is not None:
                 type, msg = pickle.loads(self._errormon.message)
-                raise type, msg
+                raise type(msg)
         elif type is LongJump:
             self._errormon.join()
             type, msg = pickle.loads(self._errormon.message)
-            raise type, msg
+            raise type(msg)
         else:
             self._slavemon.kill_all()
             self._errormon.join()
@@ -704,20 +705,20 @@ def main():
     testkill()
     #print 'kill done'
     for i in range(100):
-        print 'run', i
+        print('run', i)
         testreduction()
-        print 'private'
+        print('private')
         testprivate()
-        print 'shared'
+        print('shared')
         testshared()
-        print 'bairer'
+        print('bairer')
         testbarrier()
-        print 'raisecritical'
+        print('raisecritical')
         testraisecritical()
-        print 'raiseordered'
+        print('raiseordered')
         testraiseordered()
-        print 'done', i
-    print 'all done'
+        print('done', i)
+    print('all done')
 
 if __name__ == '__main__':
     main()

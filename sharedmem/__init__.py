@@ -94,5 +94,5 @@ Other Tools:
       Use when appropriate.
 """
 
-from core import *
-from lib import *
+from .core import *
+from .lib import *
