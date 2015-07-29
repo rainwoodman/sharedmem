@@ -68,6 +68,10 @@
             with p.critical:                 omp critical
                 xxxx 
 """
+
+__author__ = "Yu Feng"
+__email__ = "rainwoodman@gmail.com"
+
 import numpy
 import traceback as tb
 import signal
@@ -81,10 +85,10 @@ from multiprocessing.synchronize import Semaphore
 from multiprocessing.queues import SimpleQueue
 from threading import Thread
 
-from . import backends
-from .memory import empty
+from . import sharedmem
 
 __all__ = ['Parallel', 'ParallelException']
+
 class ParallelException(Exception):
     """When a Slave process is unexpectedly killed (by the OS, eg, OOM)"""
     pass
@@ -242,7 +246,7 @@ class Parallel(object):
 
     """
     def __init__(self, *args, **kwargs):
-        self.num_threads = kwargs.get('num_threads', backends.cpu_count())
+        self.num_threads = kwargs.get('num_threads', sharedmem.cpu_count())
         self.var = Var()
         self.rank = 0
         self.master = True
@@ -273,7 +277,7 @@ class Parallel(object):
         self.critical = Semaphore(1)
         self._errormon = ErrorMonitor() 
         self._slavemon = SlaveMonitor(self._errormon) 
-        shared = empty((),
+        shared = sharedmem.empty((),
                 dtype=[
                     ('ordered', 'intp'),
                     ('barrier', 'intp'),
@@ -572,7 +576,7 @@ class Shared(VarSet):
        use numpy.int8.
     """
     def beforefork(self, parallel):
-        self.data = empty((), self._dtype)
+        self.data = sharedmem.empty((), self._dtype)
         for key, value in self._input:
             self.data[key] = value
 
@@ -592,7 +596,7 @@ class Reduction(VarSet):
         VarSet.__init__(self, **kwargs)
 
     def beforefork(self, parallel):
-        self._fulldata = empty(parallel.num_threads, self._dtype)
+        self._fulldata = sharedmem.empty(parallel.num_threads, self._dtype)
 
     def afterfork(self, parallel):
         self.data = self._fulldata[parallel.rank]

@@ -1,3 +1,25 @@
+"""
+Dispatch your trivially parallizable jobs with sharedmem.
+
+Environment variable OMP_NUM_THREADS is used to determine the
+default number of slaves.
+
+This file (sharedmem.py) can be embedded into other projects. 
+
+The only external dependency is numpy.
+
+"""
+__author__ = "Yu Feng"
+__email__ = "rainwoodman@gmail.com"
+
+__all__ = ['set_debug', 'get_debug', 
+        'total_memory', 'cpu_count', 
+        'SlaveException', 'StopProcessGroup',
+        'background',
+        'MapReduce', 'MapReduceByThread',
+        'empty', 'empty_like', 'copy',
+        ]
+
 import os
 import multiprocessing
 import threading
@@ -10,13 +32,18 @@ from collections import deque
 import traceback
 import time
 import gc
+import threading
+import heapq
+import os
+
+import numpy
+from multiprocessing import RawArray
+import ctypes
+import mmap
 #logger = multiprocessing.log_to_stderr()
 #logger.setLevel(multiprocessing.SUBDEBUG)
 
 __shmdebug__ = False
-__all__ = ['set_debug', 'get_debug', 'total_memory', 'cpu_count', 'ThreadBackend',
-        'ProcessBackend', 'SlaveException', 'StopProcessGroup',
-        'ProcessGroup']
 
 def set_debug(flag):
   """ in debug mode (flag==True), no slaves are spawn,
@@ -40,6 +67,7 @@ def total_memory():
           if words[0].upper() == 'MEMTOTAL:':
                 return int(words[1]) * 1024
   raise IOError('MemTotal unknown')
+
 def cpu_count():
   """ The cpu count defaults to the number of physical cpu cores
       but can be set with OMP_NUM_THREADS environment variable.
@@ -296,4 +324,230 @@ class ProcessBackend:
       @staticmethod
       def StorageFactory():
           return lambda:None
+
+class background(object):
+    """ to run a function in async with a process.
+
+        def function(*args, **kwargs):
+            pass
+
+        bg = background(function, *args, **kwargs)
+
+        rt = bg.wait()
+    """
+    def __init__(self, function, *args, **kwargs):
+            
+        backend = kwargs.pop('backend', ProcessBackend)
+
+        self.result = backend.QueueFactory(1)
+        self.slave = backend.SlaveFactory(target=self.closure, 
+                args=(function, args, kwargs, self.result))
+        self.slave.start()
+
+    def closure(self, function, args, kwargs, result):
+        try:
+            rt = function(*args, **kwargs)
+        except Exception as e:
+            result.put((e, traceback.format_exc()))
+        else:
+            result.put((None, rt))
+
+    def wait(self):
+        e, r = self.result.get()
+        self.slave.join()
+        self.slave = None
+        self.result = None
+        if isinstance(e, Exception):
+            raise SlaveException(e, r)
+        return r
+
+def MapReduceByThread(np=None):
+    return MapReduce(backend=ThreadBackend, np=np)
+
+class MapReduce(object):
+    def __init__(self, backend=ProcessBackend, np=None):
+        """ if np is 0, run in serial """
+        self.backend = backend
+        if np is None:
+            self.np = cpu_count()
+        else:
+            self.np = np
+
+    def main(self, pg, Q, R, sequence, realfunc):
+        # get and put will raise SlaveException
+        # and terminate the process.
+        # the exception is muted in ProcessGroup,
+        # as it will only be dispatched from master.
+        while True:
+            capsule = pg.get(Q)
+            if capsule is None:
+                return
+            if len(capsule) == 1:
+                i, = capsule
+                work = sequence[i]
+            else:
+                i, work = capsule
+            self.ordered.move(i)
+            r = realfunc(work)
+            pg.put(R, (i, r))
+
+
+    def __enter__(self):
+        self.critical = self.backend.LockFactory()
+        self.ordered = Ordered(self.backend)
+        return self
+
+    def __exit__(self, *args):
+        self.ordered = None
+        pass
+
+    def map(self, func, sequence, reduce=None, star=False):
+        def realreduce(r):
+            if reduce:
+                if isinstance(r, tuple):
+                    return reduce(*r)
+                else:
+                    return reduce(r)
+            return r
+
+        def realfunc(i):
+            if star: return func(*i)
+            else: return func(i)
+
+        if self.np == 0 or get_debug():
+            #Do this in serial
+            return [realreduce(realfunc(i)) for i in sequence]
+
+        Q = self.backend.QueueFactory(64)
+        R = self.backend.QueueFactory(64)
+        self.ordered.reset()
+
+        pg = ProcessGroup(main=self.main, np=self.np,
+                backend=self.backend,
+                args=(Q, R, sequence, realfunc))
+
+        pg.start()
+
+        L = []
+        N = []
+        def feeder(pg, Q, N):
+            #   will fail silently if any error occurs.
+            j = 0
+            try:
+                for i, work in enumerate(sequence):
+                    if not hasattr(sequence, '__getitem__'):
+                        pg.put(Q, (i, work))
+                    else:
+                        pg.put(Q, (i, ))
+                    j = j + 1
+                N.append(j)
+
+                for i in range(self.np):
+                    pg.put(Q, None)
+            except StopProcessGroup:
+                return
+            finally:
+                pass
+        feeder = threading.Thread(None, feeder, args=(pg, Q, N))
+        feeder.start() 
+
+        # we run fetcher on main thread to catch exceptions
+        # raised by reduce 
+        count = 0
+        try:
+            while True:
+                try:
+                    capsule = pg.get(R)
+                except queue.Empty:
+                    continue
+                except StopProcessGroup:
+                    raise pg.get_exception()
+                capsule = capsule[0], realreduce(capsule[1])
+                heapq.heappush(L, capsule)
+                count = count + 1
+                if len(N) > 0 and count == N[0]: 
+                    # if finished feeding see if all
+                    # results have been obtained
+                    break
+            rt = []
+#            R.close()
+#            R.join_thread()
+            while len(L) > 0:
+                rt.append(heapq.heappop(L)[1])
+            pg.join()
+            feeder.join()
+            assert N[0] == len(rt)
+            return rt
+        except BaseException as e:
+            pg.killall()
+            pg.join()
+            feeder.join()
+            raise 
+
+
+def empty_like(array, dtype=None):
+  if dtype is None: dtype = array.dtype
+  return anonymousmemmap(numpy.broadcast(array, array).shape, dtype)
+
+def empty(shape, dtype='f8'):
+  """ allocates an empty array on the shared memory """
+  return anonymousmemmap(shape, dtype)
+
+def copy(a):
+  """ copies an array to the shared memory, use
+     a = copy(a) to immediately dereference the old 'a' on private memory
+   """
+  shared = anonymousmemmap(a.shape, dtype=a.dtype)
+  shared[:] = a[:]
+  return shared
+
+def fromiter(iter, dtype, count=None):
+    return copy(numpy.fromiter(iter, dtype, count))
+
+def __unpickle__(ai, dtype):
+  dtype = numpy.dtype(dtype)
+  tp = numpy.ctypeslib._typecodes['|u1']
+  # if there are strides, use strides, otherwise the stride is the itemsize of dtype
+  if ai['strides']:
+    tp *= ai['strides'][-1]
+  else:
+    tp *= dtype.itemsize
+  for i in numpy.asarray(ai['shape'])[::-1]:
+    tp *= i
+  # grab a flat char array at the sharemem address, with length at least contain ai required
+  ra = tp.from_address(ai['data'][0])
+  buffer = numpy.ctypeslib.as_array(ra).ravel()
+  # view it as what it should look like
+  shm = numpy.ndarray(buffer=buffer, dtype=dtype, 
+      strides=ai['strides'], shape=ai['shape']).view(type=anonymousmemmap)
+  return shm
+
+class anonymousmemmap(numpy.memmap):
+    def __new__(subtype, shape, dtype=numpy.uint8, order='C'):
+
+        descr = numpy.dtype(dtype)
+        _dbytes = descr.itemsize
+
+        shape = numpy.atleast_1d(shape)
+        size = 1
+        for k in shape:
+            size *= k
+
+        bytes = int(size*_dbytes)
+
+        if bytes > 0:
+            mm = mmap.mmap(-1, bytes)
+        else:
+            mm = numpy.empty(0, dtype=descr)
+        self = numpy.ndarray.__new__(subtype, shape, dtype=descr, buffer=mm, order=order)
+        self._mmap = mm
+        return self
+        
+    def __array_wrap__(self, outarr, context=None):
+    # after ufunc this won't be on shm!
+        return numpy.ndarray.__array_wrap__(self.view(numpy.ndarray), outarr, context)
+
+    def __reduce__(self):
+        return __unpickle__, (self.__array_interface__, self.dtype)
+
 
