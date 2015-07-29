@@ -1,8 +1,4 @@
 import numpy
-try:
-    import copy_reg as copyreg
-except ImportError:
-    import copyreg
 
 from multiprocessing import RawArray
 import ctypes
@@ -46,9 +42,6 @@ def __unpickle__(ai, dtype):
       strides=ai['strides'], shape=ai['shape']).view(type=anonymousmemmap)
   return shm
 
-def __pickle__(obj):
-  return obj.__reduce__()
-
 class anonymousmemmap(numpy.memmap):
     def __new__(subtype, shape, dtype=numpy.uint8, order='C'):
 
@@ -69,16 +62,12 @@ class anonymousmemmap(numpy.memmap):
         self = numpy.ndarray.__new__(subtype, shape, dtype=descr, buffer=mm, order=order)
         self._mmap = mm
         return self
-
+        
     def __array_wrap__(self, outarr, context=None):
     # after ufunc this won't be on shm!
         return numpy.ndarray.__array_wrap__(self.view(numpy.ndarray), outarr, context)
 
     def __reduce__(self):
-        if hasattr(self, '_mmap'):
-            return __unpickle__, (self.__array_interface__, self.dtype)
-        else:
-            return numpy.ndarray.__reduce__(self)
+        return __unpickle__, (self.__array_interface__, self.dtype)
 
-copyreg.pickle(anonymousmemmap, __pickle__, __unpickle__)
 
