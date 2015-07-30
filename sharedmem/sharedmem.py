@@ -1,6 +1,9 @@
 """
     Easier parallel programming on shared memory computers.
 
+    .. contents:: Topics
+        :local:
+
     Programming Model
     -----------------
     :py:class:`MapReduce` provides the equivalent to multiprocessing.Pool, with the following
@@ -22,7 +25,9 @@
 
     Usage
     -----
-    This file (sharedmem.py) can be embedded into other projects. 
+    The package can be installed via :code:`easy_install sharedmem`.
+    Alternatively, the file :code:`sharedmem.py` can be directly embedded into 
+    other projects.
 
     The only external dependency is numpy, since this was designed to
     work with large shared memory chunks through numpy.ndarray.
@@ -91,7 +96,9 @@
     >>>    pool.map(work, range(10))
     >>> print(counter)
 
-
+    API References
+    --------------
+    
 """
 __author__ = "Yu Feng"
 __email__ = "rainwoodman@gmail.com"
