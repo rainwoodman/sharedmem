@@ -1,6 +1,6 @@
 from numpy.distutils.core import setup, Extension
 from numpy import get_include
-setup(name="sharedmem", version="0.2",
+setup(name="sharedmem", version="0.3",
       author="Yu Feng",
       author_email="yfeng1@andrew.cmu.edu",
       description="Easy routines for coding on sharedmem machines",
