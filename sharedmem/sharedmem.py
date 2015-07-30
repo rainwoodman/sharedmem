@@ -1,6 +1,8 @@
 """
     Easier parallel programming on shared memory computers.
 
+    The source code is at http://github.com/rainwoodman/sharedmem .
+
     .. contents:: Topics
         :local:
 
