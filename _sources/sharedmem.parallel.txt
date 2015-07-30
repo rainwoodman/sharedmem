@@ -1,7 +1,0 @@
-sharedmem.parallel module
-=========================
-
-.. automodule:: sharedmem.parallel
-    :members:
-    :undoc-members:
-    :show-inheritance:

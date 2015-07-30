@@ -1,7 +1,0 @@
-sharedmem.sharedmem module
-==========================
-
-.. automodule:: sharedmem.sharedmem
-    :members:
-    :undoc-members:
-    :show-inheritance:

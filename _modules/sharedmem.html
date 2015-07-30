@@ -48,36 +48,98 @@
             
   <h1>Source code for sharedmem</h1><div class="highlight"><pre>
 <span class="sd">&quot;&quot;&quot;</span>
-<span class="sd">Easier parallel programming on shared memory computers.</span>
+<span class="sd">    Easier parallel programming on shared memory computers.</span>
 
-<span class="sd">Programming Model</span>
-<span class="sd">-----------------</span>
-<span class="sd">:py:class:`MapReduce` provides the equivalent to multiprocessing.Pool, with the following</span>
-<span class="sd">differences:</span>
+<span class="sd">    Programming Model</span>
+<span class="sd">    -----------------</span>
+<span class="sd">    :py:class:`MapReduce` provides the equivalent to multiprocessing.Pool, with the following</span>
+<span class="sd">    differences:</span>
 
-<span class="sd">- MapReduce does not require the work function to be picklable.</span>
-<span class="sd">- MapReduce adds a reduction step that is guaranteed to run on the master process&#39;s</span>
-<span class="sd">  scope.</span>
-<span class="sd">- MapReduce allows the use of critical sections and ordered execution in the work</span>
-<span class="sd">  function.</span>
+<span class="sd">    - MapReduce does not require the work function to be picklable.</span>
+<span class="sd">    - MapReduce adds a reduction step that is guaranteed to run on the master process&#39;s</span>
+<span class="sd">      scope.</span>
+<span class="sd">    - MapReduce allows the use of critical sections and ordered execution in the work</span>
+<span class="sd">      function.</span>
 
-<span class="sd">Modifications to shared Memory arrays (allocated via sharedmem.empty </span>
-<span class="sd">sharedmem.empty_like or sharedmem.copy) are visible by all processes, including the</span>
-<span class="sd">master process.</span>
+<span class="sd">    Modifications to shared Memory arrays, allocated via </span>
 
-<span class="sd">Usage</span>
-<span class="sd">-----</span>
-<span class="sd">Environment variable OMP_NUM_THREADS is used to determine the</span>
-<span class="sd">default number of slaves.</span>
+<span class="sd">    - :py:meth:`sharedmem.empty`,</span>
+<span class="sd">    - :py:meth:`sharedmem.empty_like`,</span>
+<span class="sd">    - :py:meth:`sharedmem.copy`,</span>
 
-<span class="sd">This file (sharedmem.py) can be embedded into other projects. </span>
-<span class="sd">The only external dependency is numpy, since this was designed to</span>
-<span class="sd">work with large shared memory chunks through numpy.ndarray.</span>
+<span class="sd">    are visible by all processes, including the master process.</span>
 
-<span class="sd">Notes</span>
-<span class="sd">-----</span>
-<span class="sd">This module depends on the `fork` system call, thus is available</span>
-<span class="sd">only on posix systems (not Windows).</span>
+<span class="sd">    Usage</span>
+<span class="sd">    -----</span>
+<span class="sd">    This file (sharedmem.py) can be embedded into other projects. </span>
+
+<span class="sd">    The only external dependency is numpy, since this was designed to</span>
+<span class="sd">    work with large shared memory chunks through numpy.ndarray.</span>
+
+<span class="sd">    Environment variable OMP_NUM_THREADS is used to determine the</span>
+<span class="sd">    default number of slaves.</span>
+
+<span class="sd">    Notes</span>
+<span class="sd">    -----</span>
+<span class="sd">    This module depends on the `fork` system call, thus is available</span>
+<span class="sd">    only on posix systems (not Windows).</span>
+
+<span class="sd">    Examples</span>
+<span class="sd">    --------</span>
+
+<span class="sd">    Sum up a large array</span>
+
+<span class="sd">    &gt;&gt;&gt; input = numpy.arange(1024 * 1024 * 128, dtype=&#39;f8&#39;)</span>
+<span class="sd">    &gt;&gt;&gt; output = sharedmem.empty(1024 * 1024 * 128, dtype=&#39;f8&#39;)</span>
+<span class="sd">    &gt;&gt;&gt; with MapReduce() as pool:</span>
+<span class="sd">    &gt;&gt;&gt;    chunksize = 1024 * 1024</span>
+<span class="sd">    &gt;&gt;&gt;    def work(i):</span>
+<span class="sd">    &gt;&gt;&gt;        s = slice (i, i + chunksize)</span>
+<span class="sd">    &gt;&gt;&gt;        output[s] = input[s]</span>
+<span class="sd">    &gt;&gt;&gt;        return i, sum(input[s])</span>
+<span class="sd">    &gt;&gt;&gt;    def reduce(i, r):</span>
+<span class="sd">    &gt;&gt;&gt;        print(&#39;chunk&#39;, i, &#39;done&#39;)</span>
+<span class="sd">    &gt;&gt;&gt;        return r</span>
+<span class="sd">    &gt;&gt;&gt;    r = pool.map(work, range(0, len(input), chunksize), reduce=reduce)</span>
+<span class="sd">    &gt;&gt;&gt; print numpy.sum(r)</span>
+<span class="sd">    &gt;&gt;&gt;</span>
+
+<span class="sd">    Textual analysis</span>
+
+<span class="sd">    &gt;&gt;&gt; input = file(&#39;mytextfile.txt&#39;).readlines()</span>
+<span class="sd">    &gt;&gt;&gt; word_count = {&#39;bacon&#39;: 0, &#39;eggs&#39;: 0 }</span>
+<span class="sd">    &gt;&gt;&gt; with MapReduce() as pool:</span>
+<span class="sd">    &gt;&gt;&gt;    def work(line):</span>
+<span class="sd">    &gt;&gt;&gt;        words = line.split()</span>
+<span class="sd">    &gt;&gt;&gt;        for word in words:</span>
+<span class="sd">    &gt;&gt;&gt;            word_count[word] += 1</span>
+<span class="sd">    &gt;&gt;&gt;        return word_count</span>
+<span class="sd">    &gt;&gt;&gt;    def reduce(wc):</span>
+<span class="sd">    &gt;&gt;&gt;        for key in word_count:</span>
+<span class="sd">    &gt;&gt;&gt;            word_count[key] += wc[key]</span>
+<span class="sd">    &gt;&gt;&gt; print word_count</span>
+<span class="sd">    &gt;&gt;&gt;</span>
+
+<span class="sd">    pool.ordered can be used to require a block of code to be executed in order</span>
+<span class="sd">    </span>
+<span class="sd">    &gt;&gt;&gt; with MapReduce() as pool:</span>
+<span class="sd">    &gt;&gt;&gt;    def work(i):</span>
+<span class="sd">    &gt;&gt;&gt;         with pool.ordered:</span>
+<span class="sd">    &gt;&gt;&gt;            print(i)</span>
+<span class="sd">    &gt;&gt;&gt;    pool.map(work, range(10))</span>
+
+<span class="sd">    pool.critical can be used to require a block of code to be executed in a critical</span>
+<span class="sd">    section.</span>
+
+<span class="sd">    &gt;&gt;&gt; counter = sharedmem.empty(1)</span>
+<span class="sd">    &gt;&gt;&gt; counter[:] = 0</span>
+<span class="sd">    &gt;&gt;&gt; with MapReduce() as pool:</span>
+<span class="sd">    &gt;&gt;&gt;    def work(i):</span>
+<span class="sd">    &gt;&gt;&gt;         with pool.critical:</span>
+<span class="sd">    &gt;&gt;&gt;             counter[:] += i</span>
+<span class="sd">    &gt;&gt;&gt;    pool.map(work, range(10))</span>
+<span class="sd">    &gt;&gt;&gt; print(counter)</span>
+
 
 <span class="sd">&quot;&quot;&quot;</span>
 <span class="n">__author__</span> <span class="o">=</span> <span class="s">&quot;Yu Feng&quot;</span>
@@ -405,12 +467,14 @@
 <div class="viewcode-block" id="background"><a class="viewcode-back" href="../sharedmem.html#sharedmem.background">[docs]</a><span class="k">class</span> <span class="nc">background</span><span class="p">(</span><span class="nb">object</span><span class="p">):</span>
     <span class="sd">&quot;&quot;&quot; to run a function in async with a process.</span>
 
-<span class="sd">        def function(*args, **kwargs):</span>
-<span class="sd">            pass</span>
+<span class="sd">        Examples</span>
+<span class="sd">        --------</span>
 
-<span class="sd">        bg = background(function, *args, **kwargs)</span>
+<span class="sd">        &gt;&gt;&gt; def function(*args, **kwargs):</span>
+<span class="sd">        &gt;&gt;&gt;    pass</span>
+<span class="sd">        &gt;&gt;&gt; bg = background(function, *args, **kwargs)</span>
+<span class="sd">        &gt;&gt;&gt; rt = bg.wait()</span>
 
-<span class="sd">        rt = bg.wait()</span>
 <span class="sd">    &quot;&quot;&quot;</span>
     <span class="k">def</span> <span class="nf">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">function</span><span class="p">,</span> <span class="o">*</span><span class="n">args</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">):</span>
             
@@ -456,62 +520,6 @@
 <span class="sd">        Notes</span>
 <span class="sd">        -----</span>
 <span class="sd">        Always wrap the call to :py:meth:`map` in a context manager (&#39;with&#39;) block.</span>
-
-<span class="sd">        Examples</span>
-<span class="sd">        --------</span>
-
-<span class="sd">        Sum up a large array</span>
-
-<span class="sd">        &gt;&gt;&gt; input = numpy.arange(1024 * 1024 * 128, dtype=&#39;f8&#39;)</span>
-<span class="sd">        &gt;&gt;&gt; output = sharedmem.empty(1024 * 1024 * 128, dtype=&#39;f8&#39;)</span>
-<span class="sd">        &gt;&gt;&gt; with MapReduce() as pool:</span>
-<span class="sd">        &gt;&gt;&gt;    chunksize = 1024 * 1024</span>
-<span class="sd">        &gt;&gt;&gt;    def work(i):</span>
-<span class="sd">        &gt;&gt;&gt;        s = slice (i, i + chunksize)</span>
-<span class="sd">        &gt;&gt;&gt;        output[s] = input[s]</span>
-<span class="sd">        &gt;&gt;&gt;        return i, sum(input[s])</span>
-<span class="sd">        &gt;&gt;&gt;    def reduce(i, r):</span>
-<span class="sd">        &gt;&gt;&gt;        print(&#39;chunk&#39;, i, &#39;done&#39;)</span>
-<span class="sd">        &gt;&gt;&gt;        return r</span>
-<span class="sd">        &gt;&gt;&gt;    r = pool.map(work, range(0, len(input), chunksize), reduce=reduce)</span>
-<span class="sd">        &gt;&gt;&gt; print numpy.sum(r)</span>
-<span class="sd">        &gt;&gt;&gt;</span>
-
-<span class="sd">        Textual analysis</span>
-
-<span class="sd">        &gt;&gt;&gt; input = file(&#39;mytextfile.txt&#39;).readlines()</span>
-<span class="sd">        &gt;&gt;&gt; word_count = {&#39;bacon&#39;: 0, &#39;eggs&#39;: 0 }</span>
-<span class="sd">        &gt;&gt;&gt; with MapReduce() as pool:</span>
-<span class="sd">        &gt;&gt;&gt;    def work(line):</span>
-<span class="sd">        &gt;&gt;&gt;        words = line.split()</span>
-<span class="sd">        &gt;&gt;&gt;        for word in words:</span>
-<span class="sd">        &gt;&gt;&gt;            word_count[word] += 1</span>
-<span class="sd">        &gt;&gt;&gt;        return word_count</span>
-<span class="sd">        &gt;&gt;&gt;    def reduce(wc):</span>
-<span class="sd">        &gt;&gt;&gt;        for key in word_count:</span>
-<span class="sd">        &gt;&gt;&gt;            word_count[key] += wc[key]</span>
-<span class="sd">        &gt;&gt;&gt; print word_count</span>
-<span class="sd">        &gt;&gt;&gt;</span>
-
-<span class="sd">        pool.ordered can be used to require a block of code to be executed in order</span>
-<span class="sd">        </span>
-<span class="sd">        &gt;&gt;&gt; with MapReduce() as pool:</span>
-<span class="sd">        &gt;&gt;&gt;    def work(i):</span>
-<span class="sd">        &gt;&gt;&gt;         with pool.ordered:</span>
-<span class="sd">        &gt;&gt;&gt;            print(i)</span>
-<span class="sd">        &gt;&gt;&gt;    pool.map(work, range(10))</span>
-
-<span class="sd">        pool.critical can be used to require a block of code to be executed in a critical</span>
-<span class="sd">        section.</span>
-
-<span class="sd">        &gt;&gt;&gt; counter = sharedmem.empty(1)</span>
-<span class="sd">        &gt;&gt;&gt; counter[:] = 0</span>
-<span class="sd">        &gt;&gt;&gt; with MapReduce() as pool:</span>
-<span class="sd">        &gt;&gt;&gt;    def work(i):</span>
-<span class="sd">        &gt;&gt;&gt;         with pool.critical:</span>
-<span class="sd">        &gt;&gt;&gt;             counter[:] += i</span>
-<span class="sd">        &gt;&gt;&gt;    pool.map(work, range(10))</span>
-<span class="sd">        &gt;&gt;&gt; print(counter)</span>
 
 <span class="sd">    &quot;&quot;&quot;</span>
     <span class="k">def</span> <span class="nf">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">backend</span><span class="o">=</span><span class="n">ProcessBackend</span><span class="p">,</span> <span class="n">np</span><span class="o">=</span><span class="bp">None</span><span class="p">):</span>
