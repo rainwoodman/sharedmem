@@ -5,12 +5,3 @@ sharedmem package
     :members:
     :undoc-members:
     :show-inheritance:
-
-Submodules
-----------
-
-.. toctree::
-
-   sharedmem.parallel
-   sharedmem.sharedmem
-

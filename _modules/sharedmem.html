@@ -6,39 +6,38 @@
   <head>
     <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
     
-    <title>sharedmem.sharedmem &mdash; sharedmem 0.3 documentation</title>
+    <title>sharedmem &mdash; sharedmem 0.3 documentation</title>
     
-    <link rel="stylesheet" href="../../_static/nature.css" type="text/css" />
-    <link rel="stylesheet" href="../../_static/pygments.css" type="text/css" />
+    <link rel="stylesheet" href="../_static/nature.css" type="text/css" />
+    <link rel="stylesheet" href="../_static/pygments.css" type="text/css" />
     
     <script type="text/javascript">
       var DOCUMENTATION_OPTIONS = {
-        URL_ROOT:    '../../',
+        URL_ROOT:    '../',
         VERSION:     '0.3',
         COLLAPSE_INDEX: false,
         FILE_SUFFIX: '.html',
         HAS_SOURCE:  true
       };
     </script>
-    <script type="text/javascript" src="../../_static/jquery.js"></script>
-    <script type="text/javascript" src="../../_static/underscore.js"></script>
-    <script type="text/javascript" src="../../_static/doctools.js"></script>
-    <link rel="top" title="sharedmem 0.3 documentation" href="../../index.html" />
-    <link rel="up" title="sharedmem" href="../sharedmem.html" /> 
+    <script type="text/javascript" src="../_static/jquery.js"></script>
+    <script type="text/javascript" src="../_static/underscore.js"></script>
+    <script type="text/javascript" src="../_static/doctools.js"></script>
+    <link rel="top" title="sharedmem 0.3 documentation" href="../index.html" />
+    <link rel="up" title="Module code" href="index.html" /> 
   </head>
   <body role="document">
     <div class="related" role="navigation" aria-label="related navigation">
       <h3>Navigation</h3>
       <ul>
         <li class="right" style="margin-right: 10px">
-          <a href="../../genindex.html" title="General Index"
+          <a href="../genindex.html" title="General Index"
              accesskey="I">index</a></li>
         <li class="right" >
-          <a href="../../py-modindex.html" title="Python Module Index"
+          <a href="../py-modindex.html" title="Python Module Index"
              >modules</a> |</li>
-        <li class="nav-item nav-item-0"><a href="../../index.html">sharedmem 0.3 documentation</a> &raquo;</li>
-          <li class="nav-item nav-item-1"><a href="../index.html" >Module code</a> &raquo;</li>
-          <li class="nav-item nav-item-2"><a href="../sharedmem.html" accesskey="U">sharedmem</a> &raquo;</li> 
+        <li class="nav-item nav-item-0"><a href="../index.html">sharedmem 0.3 documentation</a> &raquo;</li>
+          <li class="nav-item nav-item-1"><a href="index.html" accesskey="U">Module code</a> &raquo;</li> 
       </ul>
     </div>  
 
@@ -47,7 +46,7 @@
         <div class="bodywrapper">
           <div class="body" role="main">
             
-  <h1>Source code for sharedmem.sharedmem</h1><div class="highlight"><pre>
+  <h1>Source code for sharedmem</h1><div class="highlight"><pre>
 <span class="sd">&quot;&quot;&quot;</span>
 <span class="sd">Easier parallel programming on shared memory computers.</span>
 
@@ -116,7 +115,7 @@
 
 <span class="n">__shmdebug__</span> <span class="o">=</span> <span class="bp">False</span>
 
-<div class="viewcode-block" id="set_debug"><a class="viewcode-back" href="../../sharedmem.sharedmem.html#sharedmem.sharedmem.set_debug">[docs]</a><span class="k">def</span> <span class="nf">set_debug</span><span class="p">(</span><span class="n">flag</span><span class="p">):</span>
+<div class="viewcode-block" id="set_debug"><a class="viewcode-back" href="../sharedmem.html#sharedmem.set_debug">[docs]</a><span class="k">def</span> <span class="nf">set_debug</span><span class="p">(</span><span class="n">flag</span><span class="p">):</span>
     <span class="sd">&quot;&quot;&quot; Set the debug mode.</span>
 
 <span class="sd">        In debug mode (flag==True), no slaves are spawn.</span>
@@ -126,12 +125,12 @@
     <span class="k">global</span> <span class="n">__shmdebug__</span>
     <span class="n">__shmdebug__</span> <span class="o">=</span> <span class="n">flag</span>
 </div>
-<div class="viewcode-block" id="get_debug"><a class="viewcode-back" href="../../sharedmem.sharedmem.html#sharedmem.sharedmem.get_debug">[docs]</a><span class="k">def</span> <span class="nf">get_debug</span><span class="p">():</span>
+<div class="viewcode-block" id="get_debug"><a class="viewcode-back" href="../sharedmem.html#sharedmem.get_debug">[docs]</a><span class="k">def</span> <span class="nf">get_debug</span><span class="p">():</span>
     <span class="sd">&quot;&quot;&quot; Get the debug mode &quot;&quot;&quot;</span>    
     <span class="k">global</span> <span class="n">__shmdebug__</span>
     <span class="k">return</span> <span class="n">__shmdebug__</span>
 </div>
-<div class="viewcode-block" id="total_memory"><a class="viewcode-back" href="../../sharedmem.sharedmem.html#sharedmem.sharedmem.total_memory">[docs]</a><span class="k">def</span> <span class="nf">total_memory</span><span class="p">():</span>
+<div class="viewcode-block" id="total_memory"><a class="viewcode-back" href="../sharedmem.html#sharedmem.total_memory">[docs]</a><span class="k">def</span> <span class="nf">total_memory</span><span class="p">():</span>
     <span class="sd">&quot;&quot;&quot; Returns the the amount of memory available for use.</span>
 
 <span class="sd">        This function is not very useful.</span>
@@ -145,7 +144,7 @@
             <span class="k">return</span> <span class="nb">int</span><span class="p">(</span><span class="n">words</span><span class="p">[</span><span class="mi">1</span><span class="p">])</span> <span class="o">*</span> <span class="mi">1024</span>
     <span class="k">raise</span> <span class="ne">IOError</span><span class="p">(</span><span class="s">&#39;MemTotal unknown&#39;</span><span class="p">)</span>
 </div>
-<div class="viewcode-block" id="cpu_count"><a class="viewcode-back" href="../../sharedmem.sharedmem.html#sharedmem.sharedmem.cpu_count">[docs]</a><span class="k">def</span> <span class="nf">cpu_count</span><span class="p">():</span>
+<div class="viewcode-block" id="cpu_count"><a class="viewcode-back" href="../sharedmem.html#sharedmem.cpu_count">[docs]</a><span class="k">def</span> <span class="nf">cpu_count</span><span class="p">():</span>
     <span class="sd">&quot;&quot;&quot; Returns the number of slave processes to be spawned.</span>
 
 <span class="sd">        The default value is the number of physical cpu cores seen by python.</span>
@@ -168,11 +167,11 @@
     <span class="k">except</span><span class="p">:</span>
         <span class="k">return</span> <span class="n">multiprocessing</span><span class="o">.</span><span class="n">cpu_count</span><span class="p">()</span>
 </div>
-<div class="viewcode-block" id="SlaveException"><a class="viewcode-back" href="../../sharedmem.sharedmem.html#sharedmem.sharedmem.SlaveException">[docs]</a><span class="k">class</span> <span class="nc">SlaveException</span><span class="p">(</span><span class="ne">Exception</span><span class="p">):</span>
+<div class="viewcode-block" id="SlaveException"><a class="viewcode-back" href="../sharedmem.html#sharedmem.SlaveException">[docs]</a><span class="k">class</span> <span class="nc">SlaveException</span><span class="p">(</span><span class="ne">Exception</span><span class="p">):</span>
     <span class="k">def</span> <span class="nf">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">e</span><span class="p">,</span> <span class="n">tracebackstr</span><span class="p">):</span>
         <span class="ne">Exception</span><span class="o">.</span><span class="n">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="s">&quot;</span><span class="si">%s</span><span class="se">\n</span><span class="si">%s</span><span class="s">&quot;</span> <span class="o">%</span> <span class="p">(</span><span class="nb">str</span><span class="p">(</span><span class="n">e</span><span class="p">),</span> <span class="n">tracebackstr</span><span class="p">))</span>
 </div>
-<div class="viewcode-block" id="StopProcessGroup"><a class="viewcode-back" href="../../sharedmem.sharedmem.html#sharedmem.sharedmem.StopProcessGroup">[docs]</a><span class="k">class</span> <span class="nc">StopProcessGroup</span><span class="p">(</span><span class="ne">Exception</span><span class="p">):</span>
+<div class="viewcode-block" id="StopProcessGroup"><a class="viewcode-back" href="../sharedmem.html#sharedmem.StopProcessGroup">[docs]</a><span class="k">class</span> <span class="nc">StopProcessGroup</span><span class="p">(</span><span class="ne">Exception</span><span class="p">):</span>
     <span class="sd">&quot;&quot;&quot; StopProcessGroup will terminate the slave process/thread &quot;&quot;&quot;</span>
     <span class="k">def</span> <span class="nf">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
         <span class="ne">Exception</span><span class="o">.</span><span class="n">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="s">&quot;StopProcessGroup&quot;</span><span class="p">)</span>
@@ -403,7 +402,7 @@
       <span class="k">def</span> <span class="nf">StorageFactory</span><span class="p">():</span>
           <span class="k">return</span> <span class="k">lambda</span><span class="p">:</span><span class="bp">None</span>
 
-<div class="viewcode-block" id="background"><a class="viewcode-back" href="../../sharedmem.sharedmem.html#sharedmem.sharedmem.background">[docs]</a><span class="k">class</span> <span class="nc">background</span><span class="p">(</span><span class="nb">object</span><span class="p">):</span>
+<div class="viewcode-block" id="background"><a class="viewcode-back" href="../sharedmem.html#sharedmem.background">[docs]</a><span class="k">class</span> <span class="nc">background</span><span class="p">(</span><span class="nb">object</span><span class="p">):</span>
     <span class="sd">&quot;&quot;&quot; to run a function in async with a process.</span>
 
 <span class="sd">        def function(*args, **kwargs):</span>
@@ -422,7 +421,7 @@
                 <span class="n">args</span><span class="o">=</span><span class="p">(</span><span class="n">function</span><span class="p">,</span> <span class="n">args</span><span class="p">,</span> <span class="n">kwargs</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">result</span><span class="p">))</span>
         <span class="bp">self</span><span class="o">.</span><span class="n">slave</span><span class="o">.</span><span class="n">start</span><span class="p">()</span>
 
-<div class="viewcode-block" id="background.closure"><a class="viewcode-back" href="../../sharedmem.sharedmem.html#sharedmem.sharedmem.background.closure">[docs]</a>    <span class="k">def</span> <span class="nf">closure</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">function</span><span class="p">,</span> <span class="n">args</span><span class="p">,</span> <span class="n">kwargs</span><span class="p">,</span> <span class="n">result</span><span class="p">):</span>
+<div class="viewcode-block" id="background.closure"><a class="viewcode-back" href="../sharedmem.html#sharedmem.background.closure">[docs]</a>    <span class="k">def</span> <span class="nf">closure</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">function</span><span class="p">,</span> <span class="n">args</span><span class="p">,</span> <span class="n">kwargs</span><span class="p">,</span> <span class="n">result</span><span class="p">):</span>
         <span class="k">try</span><span class="p">:</span>
             <span class="n">rt</span> <span class="o">=</span> <span class="n">function</span><span class="p">(</span><span class="o">*</span><span class="n">args</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">)</span>
         <span class="k">except</span> <span class="ne">Exception</span> <span class="k">as</span> <span class="n">e</span><span class="p">:</span>
@@ -430,7 +429,7 @@
         <span class="k">else</span><span class="p">:</span>
             <span class="n">result</span><span class="o">.</span><span class="n">put</span><span class="p">((</span><span class="bp">None</span><span class="p">,</span> <span class="n">rt</span><span class="p">))</span>
 </div>
-<div class="viewcode-block" id="background.wait"><a class="viewcode-back" href="../../sharedmem.sharedmem.html#sharedmem.sharedmem.background.wait">[docs]</a>    <span class="k">def</span> <span class="nf">wait</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+<div class="viewcode-block" id="background.wait"><a class="viewcode-back" href="../sharedmem.html#sharedmem.background.wait">[docs]</a>    <span class="k">def</span> <span class="nf">wait</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
         <span class="n">e</span><span class="p">,</span> <span class="n">r</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">result</span><span class="o">.</span><span class="n">get</span><span class="p">()</span>
         <span class="bp">self</span><span class="o">.</span><span class="n">slave</span><span class="o">.</span><span class="n">join</span><span class="p">()</span>
         <span class="bp">self</span><span class="o">.</span><span class="n">slave</span> <span class="o">=</span> <span class="bp">None</span>
@@ -439,10 +438,10 @@
             <span class="k">raise</span> <span class="n">SlaveException</span><span class="p">(</span><span class="n">e</span><span class="p">,</span> <span class="n">r</span><span class="p">)</span>
         <span class="k">return</span> <span class="n">r</span>
 </div></div>
-<div class="viewcode-block" id="MapReduceByThread"><a class="viewcode-back" href="../../sharedmem.sharedmem.html#sharedmem.sharedmem.MapReduceByThread">[docs]</a><span class="k">def</span> <span class="nf">MapReduceByThread</span><span class="p">(</span><span class="n">np</span><span class="o">=</span><span class="bp">None</span><span class="p">):</span>
+<div class="viewcode-block" id="MapReduceByThread"><a class="viewcode-back" href="../sharedmem.html#sharedmem.MapReduceByThread">[docs]</a><span class="k">def</span> <span class="nf">MapReduceByThread</span><span class="p">(</span><span class="n">np</span><span class="o">=</span><span class="bp">None</span><span class="p">):</span>
     <span class="k">return</span> <span class="n">MapReduce</span><span class="p">(</span><span class="n">backend</span><span class="o">=</span><span class="n">ThreadBackend</span><span class="p">,</span> <span class="n">np</span><span class="o">=</span><span class="n">np</span><span class="p">)</span>
 </div>
-<div class="viewcode-block" id="MapReduce"><a class="viewcode-back" href="../../sharedmem.sharedmem.html#sharedmem.sharedmem.MapReduce">[docs]</a><span class="k">class</span> <span class="nc">MapReduce</span><span class="p">(</span><span class="nb">object</span><span class="p">):</span>
+<div class="viewcode-block" id="MapReduce"><a class="viewcode-back" href="../sharedmem.html#sharedmem.MapReduce">[docs]</a><span class="k">class</span> <span class="nc">MapReduce</span><span class="p">(</span><span class="nb">object</span><span class="p">):</span>
     <span class="sd">&quot;&quot;&quot;</span>
 <span class="sd">        A pool of slave processes for a Map-Reduce operation</span>
 
@@ -523,7 +522,7 @@
         <span class="k">else</span><span class="p">:</span>
             <span class="bp">self</span><span class="o">.</span><span class="n">np</span> <span class="o">=</span> <span class="n">np</span>
 
-<div class="viewcode-block" id="MapReduce.main"><a class="viewcode-back" href="../../sharedmem.sharedmem.html#sharedmem.sharedmem.MapReduce.main">[docs]</a>    <span class="k">def</span> <span class="nf">main</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">pg</span><span class="p">,</span> <span class="n">Q</span><span class="p">,</span> <span class="n">R</span><span class="p">,</span> <span class="n">sequence</span><span class="p">,</span> <span class="n">realfunc</span><span class="p">):</span>
+<div class="viewcode-block" id="MapReduce.main"><a class="viewcode-back" href="../sharedmem.html#sharedmem.MapReduce.main">[docs]</a>    <span class="k">def</span> <span class="nf">main</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">pg</span><span class="p">,</span> <span class="n">Q</span><span class="p">,</span> <span class="n">R</span><span class="p">,</span> <span class="n">sequence</span><span class="p">,</span> <span class="n">realfunc</span><span class="p">):</span>
         <span class="c"># get and put will raise SlaveException</span>
         <span class="c"># and terminate the process.</span>
         <span class="c"># the exception is muted in ProcessGroup,</span>
@@ -550,7 +549,7 @@
         <span class="bp">self</span><span class="o">.</span><span class="n">ordered</span> <span class="o">=</span> <span class="bp">None</span>
         <span class="k">pass</span>
 
-<div class="viewcode-block" id="MapReduce.map"><a class="viewcode-back" href="../../sharedmem.sharedmem.html#sharedmem.sharedmem.MapReduce.map">[docs]</a>    <span class="k">def</span> <span class="nf">map</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">func</span><span class="p">,</span> <span class="n">sequence</span><span class="p">,</span> <span class="nb">reduce</span><span class="o">=</span><span class="bp">None</span><span class="p">,</span> <span class="n">star</span><span class="o">=</span><span class="bp">False</span><span class="p">):</span>
+<div class="viewcode-block" id="MapReduce.map"><a class="viewcode-back" href="../sharedmem.html#sharedmem.MapReduce.map">[docs]</a>    <span class="k">def</span> <span class="nf">map</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">func</span><span class="p">,</span> <span class="n">sequence</span><span class="p">,</span> <span class="nb">reduce</span><span class="o">=</span><span class="bp">None</span><span class="p">,</span> <span class="n">star</span><span class="o">=</span><span class="bp">False</span><span class="p">):</span>
         <span class="sd">&quot;&quot;&quot; Parallel map reduce.</span>
 
 <span class="sd">            Apply func to each item on the sequence, in parallel. </span>
@@ -666,18 +665,18 @@
             <span class="k">raise</span> 
 
 </div></div>
-<div class="viewcode-block" id="empty_like"><a class="viewcode-back" href="../../sharedmem.sharedmem.html#sharedmem.sharedmem.empty_like">[docs]</a><span class="k">def</span> <span class="nf">empty_like</span><span class="p">(</span><span class="n">array</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="bp">None</span><span class="p">):</span>
+<div class="viewcode-block" id="empty_like"><a class="viewcode-back" href="../sharedmem.html#sharedmem.empty_like">[docs]</a><span class="k">def</span> <span class="nf">empty_like</span><span class="p">(</span><span class="n">array</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="bp">None</span><span class="p">):</span>
     <span class="sd">&quot;&quot;&quot; Create a shared memory array from the shape of array.</span>
 <span class="sd">    &quot;&quot;&quot;</span>
     <span class="k">if</span> <span class="n">dtype</span> <span class="ow">is</span> <span class="bp">None</span><span class="p">:</span> <span class="n">dtype</span> <span class="o">=</span> <span class="n">array</span><span class="o">.</span><span class="n">dtype</span>
     <span class="k">return</span> <span class="n">anonymousmemmap</span><span class="p">(</span><span class="n">numpy</span><span class="o">.</span><span class="n">broadcast</span><span class="p">(</span><span class="n">array</span><span class="p">,</span> <span class="n">array</span><span class="p">)</span><span class="o">.</span><span class="n">shape</span><span class="p">,</span> <span class="n">dtype</span><span class="p">)</span>
 </div>
-<div class="viewcode-block" id="empty"><a class="viewcode-back" href="../../sharedmem.sharedmem.html#sharedmem.sharedmem.empty">[docs]</a><span class="k">def</span> <span class="nf">empty</span><span class="p">(</span><span class="n">shape</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="s">&#39;f8&#39;</span><span class="p">):</span>
+<div class="viewcode-block" id="empty"><a class="viewcode-back" href="../sharedmem.html#sharedmem.empty">[docs]</a><span class="k">def</span> <span class="nf">empty</span><span class="p">(</span><span class="n">shape</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="s">&#39;f8&#39;</span><span class="p">):</span>
     <span class="sd">&quot;&quot;&quot; Create an empty shared memory array.</span>
 <span class="sd">    &quot;&quot;&quot;</span>
     <span class="k">return</span> <span class="n">anonymousmemmap</span><span class="p">(</span><span class="n">shape</span><span class="p">,</span> <span class="n">dtype</span><span class="p">)</span>
 </div>
-<div class="viewcode-block" id="copy"><a class="viewcode-back" href="../../sharedmem.sharedmem.html#sharedmem.sharedmem.copy">[docs]</a><span class="k">def</span> <span class="nf">copy</span><span class="p">(</span><span class="n">a</span><span class="p">):</span>
+<div class="viewcode-block" id="copy"><a class="viewcode-back" href="../sharedmem.html#sharedmem.copy">[docs]</a><span class="k">def</span> <span class="nf">copy</span><span class="p">(</span><span class="n">a</span><span class="p">):</span>
     <span class="sd">&quot;&quot;&quot; Copy an array to the shared memory. </span>
 
 <span class="sd">        Notes</span>
@@ -755,7 +754,7 @@
         <div class="sphinxsidebarwrapper">
 <div id="searchbox" style="display: none" role="search">
   <h3>Quick search</h3>
-    <form class="search" action="../../search.html" method="get">
+    <form class="search" action="../search.html" method="get">
       <input type="text" name="q" />
       <input type="submit" value="Go" />
       <input type="hidden" name="check_keywords" value="yes" />
@@ -774,14 +773,13 @@
       <h3>Navigation</h3>
       <ul>
         <li class="right" style="margin-right: 10px">
-          <a href="../../genindex.html" title="General Index"
+          <a href="../genindex.html" title="General Index"
              >index</a></li>
         <li class="right" >
-          <a href="../../py-modindex.html" title="Python Module Index"
+          <a href="../py-modindex.html" title="Python Module Index"
              >modules</a> |</li>
-        <li class="nav-item nav-item-0"><a href="../../index.html">sharedmem 0.3 documentation</a> &raquo;</li>
-          <li class="nav-item nav-item-1"><a href="../index.html" >Module code</a> &raquo;</li>
-          <li class="nav-item nav-item-2"><a href="../sharedmem.html" >sharedmem</a> &raquo;</li> 
+        <li class="nav-item nav-item-0"><a href="../index.html">sharedmem 0.3 documentation</a> &raquo;</li>
+          <li class="nav-item nav-item-1"><a href="index.html" >Module code</a> &raquo;</li> 
       </ul>
     </div>
     <div class="footer" role="contentinfo">
