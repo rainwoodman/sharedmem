@@ -1,0 +1,819 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN"
+  "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+
+
+<html xmlns="http://www.w3.org/1999/xhtml">
+  <head>
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+    
+    <title>sharedmem.parallel &mdash; sharedmem 0.3 documentation</title>
+    
+    <link rel="stylesheet" href="../../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../../_static/pygments.css" type="text/css" />
+    
+    <script type="text/javascript">
+      var DOCUMENTATION_OPTIONS = {
+        URL_ROOT:    '../../',
+        VERSION:     '0.3',
+        COLLAPSE_INDEX: false,
+        FILE_SUFFIX: '.html',
+        HAS_SOURCE:  true
+      };
+    </script>
+    <script type="text/javascript" src="../../_static/jquery.js"></script>
+    <script type="text/javascript" src="../../_static/underscore.js"></script>
+    <script type="text/javascript" src="../../_static/doctools.js"></script>
+    <link rel="top" title="sharedmem 0.3 documentation" href="../../index.html" />
+    <link rel="up" title="Module code" href="../index.html" />
+   
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9">
+
+  </head>
+  <body role="document">
+    <div class="related" role="navigation" aria-label="related navigation">
+      <h3>Navigation</h3>
+      <ul>
+        <li class="right" style="margin-right: 10px">
+          <a href="../../genindex.html" title="General Index"
+             accesskey="I">index</a></li>
+        <li class="right" >
+          <a href="../../py-modindex.html" title="Python Module Index"
+             >modules</a> |</li>
+        <li class="nav-item nav-item-0"><a href="../../index.html">sharedmem 0.3 documentation</a> &raquo;</li>
+          <li class="nav-item nav-item-1"><a href="../index.html" accesskey="U">Module code</a> &raquo;</li> 
+      </ul>
+    </div>  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          <div class="body" role="main">
+            
+  <h1>Source code for sharedmem.parallel</h1><div class="highlight"><pre>
+<span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">   OpenMP like multiprocessing</span>
+
+<span class="sd">   Example:</span>
+
+<span class="sd">        with Parallel(</span>
+<span class="sd">                Reduction(numpy.add, a=[0, 0])</span>
+<span class="sd">                ) as p:</span>
+<span class="sd">            for i, ordered in p.forloop(range(20), </span>
+<span class="sd">                    ordered=True, schedule=&#39;dynamic&#39;):</span>
+<span class="sd">                with ordered:</span>
+<span class="sd">                    p.var.a += numpy.array([i, i * 10])</span>
+<span class="sd">                    if i == 19:</span>
+<span class="sd">                        raise ValueError(&#39;raised at i == 19&#39;)</span>
+
+<span class="sd">   1 All variables are by default &#39;Private&#39;: this differ from OpenMP</span>
+
+<span class="sd">   2 To access variables defined for the Parallel scope, use p.var</span>
+
+<span class="sd">   3 This is too slow to be useful as I can imagine. </span>
+<span class="sd">     Looping in Python is horriblly slow as we know it</span>
+<span class="sd">     and we use iterators to yield values, plus slow posix semaphores.</span>
+
+<span class="sd">   4 forloop returns the iterator for the variable if ordered == False</span>
+<span class="sd">     forloop returns the iterator variable and an Ordered object if</span>
+<span class="sd">     ordered==True.</span>
+
+<span class="sd">   5 DeadLocks: </span>
+<span class="sd">        Tested pretty extensively, but </span>
+<span class="sd">        there still may be some corner cases. </span>
+
+<span class="sd">        Biggest bunch I have fixed are because we rely on</span>
+<span class="sd">        an asynchronized Exception(AE) to jump out of a parallel scope</span>
+<span class="sd">        when there are exceptions from slave processes.</span>
+<span class="sd">        In Python AE is unsafe, even with the new &#39;with&#39; statement. </span>
+
+<span class="sd">        As a fix, we limit the AE only between __enter__ and __exit__,</span>
+<span class="sd">        and the only nontrivial object used is Semaphore. In case of</span>
+<span class="sd">        unprotected and failed Semaphore release, we release them one</span>
+<span class="sd">        more time from another thread, guareenteed to be safe from </span>
+<span class="sd">        the AE we use (signal AE)</span>
+
+<span class="sd">   </span>
+
+<span class="sd">   Comparing similiar features between Parallel and OpenMP standard:</span>
+
+<span class="sd">        Parallel               vs  openmp construct</span>
+
+<span class="sd">        with Parallel() as p:           omp parallel </span>
+<span class="sd">            xxxx</span>
+<span class="sd">            p.rank                      omp_get_thread_num()</span>
+<span class="sd">            p.num_threads               omp_get_num_threads()</span>
+
+<span class="sd">            p.var.a:                    a referes to the variable &#39;a&#39; </span>
+<span class="sd">                                        decleared with Private, Shared or Reduction</span>
+
+<span class="sd">            if p.master:                    omp master </span>
+<span class="sd">                xxxx</span>
+<span class="sd">            for i in p.forloop():           omp for</span>
+<span class="sd">                xxxxj </span>
+
+<span class="sd">            p.barrier()                       omp barrier</span>
+
+<span class="sd">            r = p.forloop(ordered=True)     omp for</span>
+<span class="sd">            for i in r:</span>
+<span class="sd">                with r.ordered:              omp ordered</span>
+<span class="sd">                    xxxx</span>
+<span class="sd">            with p.critical:                 omp critical</span>
+<span class="sd">                xxxx </span>
+<span class="sd">&quot;&quot;&quot;</span>
+
+<span class="n">__author__</span> <span class="o">=</span> <span class="s">&quot;Yu Feng&quot;</span>
+<span class="n">__email__</span> <span class="o">=</span> <span class="s">&quot;rainwoodman@gmail.com&quot;</span>
+
+<span class="kn">import</span> <span class="nn">numpy</span>
+<span class="kn">import</span> <span class="nn">traceback</span> <span class="kn">as</span> <span class="nn">tb</span>
+<span class="kn">import</span> <span class="nn">signal</span>
+<span class="kn">import</span> <span class="nn">time</span>
+<span class="kn">import</span> <span class="nn">os</span> 
+<span class="kn">import</span> <span class="nn">pickle</span>
+<span class="kn">import</span> <span class="nn">signal</span>
+
+<span class="kn">from</span> <span class="nn">multiprocessing</span> <span class="kn">import</span> <span class="n">Lock</span>
+<span class="kn">from</span> <span class="nn">multiprocessing.synchronize</span> <span class="kn">import</span> <span class="n">Semaphore</span>
+<span class="kn">from</span> <span class="nn">multiprocessing.queues</span> <span class="kn">import</span> <span class="n">SimpleQueue</span>
+<span class="kn">from</span> <span class="nn">threading</span> <span class="kn">import</span> <span class="n">Thread</span>
+
+<span class="kn">from</span> <span class="nn">.</span> <span class="kn">import</span> <span class="n">sharedmem</span>
+
+<span class="n">__all__</span> <span class="o">=</span> <span class="p">[</span><span class="s">&#39;Parallel&#39;</span><span class="p">,</span> <span class="s">&#39;ParallelException&#39;</span><span class="p">]</span>
+
+<div class="viewcode-block" id="ParallelException"><a class="viewcode-back" href="../../sharedmem.parallel.html#sharedmem.parallel.ParallelException">[docs]</a><span class="k">class</span> <span class="nc">ParallelException</span><span class="p">(</span><span class="ne">Exception</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;When a Slave process is unexpectedly killed (by the OS, eg, OOM)&quot;&quot;&quot;</span>
+    <span class="k">pass</span>
+</div>
+<span class="k">class</span> <span class="nc">LongJump</span><span class="p">(</span><span class="ne">BaseException</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;Convert SIGTRAP to an python exception so that the</span>
+<span class="sd">       parallel section will jump to __exit__.</span>
+
+<span class="sd">       We use SIGTRAP to notify the master and slave that an exception</span>
+<span class="sd">       has occured. </span>
+
+<span class="sd">       A slave process that received SIGTRAP will exit immediately.</span>
+<span class="sd">       (We rely on the OS for that)</span>
+
+<span class="sd">       LongJump is called by errormon upon detection of an error.</span>
+<span class="sd">       (ran in errormon context)</span>
+
+<span class="sd">       Python signal handler is executed at the &#39;next&#39; python </span>
+<span class="sd">       executation point after the signal is received.</span>
+
+<span class="sd">       To ensure master jumps to __exit__ we make sure the code runs</span>
+<span class="sd">       to the next bytecode asap by </span>
+<span class="sd">       We forcefully release all Semaphores, after ensuring all slaves</span>
+<span class="sd">       are killed.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">muted</span> <span class="o">=</span> <span class="bp">False</span>
+    <span class="n">parallel</span> <span class="o">=</span> <span class="bp">None</span>
+    <span class="nd">@staticmethod</span>
+    <span class="k">def</span> <span class="nf">handler</span><span class="p">(</span><span class="n">a</span><span class="p">,</span> <span class="n">b</span><span class="p">):</span>
+        <span class="n">tb</span> <span class="o">=</span> <span class="p">[]</span>
+        <span class="k">while</span> <span class="n">b</span> <span class="ow">is</span> <span class="ow">not</span> <span class="bp">None</span><span class="p">:</span>
+            <span class="n">tb</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="s">&#39;</span><span class="si">%d</span><span class="s"> </span><span class="si">%s</span><span class="s"> </span><span class="si">%d</span><span class="s">&#39;</span> <span class="o">%</span> <span class="p">(</span><span class="n">b</span><span class="o">.</span><span class="n">f_lineno</span><span class="p">,</span> <span class="n">b</span><span class="o">.</span><span class="n">f_code</span><span class="o">.</span><span class="n">co_filename</span><span class="p">,</span>
+                <span class="n">os</span><span class="o">.</span><span class="n">getpid</span><span class="p">()))</span>
+            <span class="n">b</span> <span class="o">=</span> <span class="n">b</span><span class="o">.</span><span class="n">f_back</span>
+        <span class="k">raise</span> <span class="n">LongJump</span><span class="p">(</span><span class="s">&#39;</span><span class="se">\n</span><span class="s">&#39;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">tb</span><span class="p">))</span>
+    <span class="nd">@classmethod</span>
+    <span class="k">def</span> <span class="nf">listen</span><span class="p">(</span><span class="n">kls</span><span class="p">,</span> <span class="n">parallel</span><span class="p">):</span>
+        <span class="n">kls</span><span class="o">.</span><span class="n">parallel</span> <span class="o">=</span> <span class="n">parallel</span>
+        <span class="n">signal</span><span class="o">.</span><span class="n">signal</span><span class="p">(</span><span class="n">signal</span><span class="o">.</span><span class="n">SIGTRAP</span><span class="p">,</span> <span class="n">kls</span><span class="o">.</span><span class="n">handler</span><span class="p">)</span>
+        <span class="n">kls</span><span class="o">.</span><span class="n">muted</span> <span class="o">=</span> <span class="bp">False</span>
+    <span class="nd">@classmethod</span>
+    <span class="k">def</span> <span class="nf">mute</span><span class="p">(</span><span class="n">kls</span><span class="p">):</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="n">kls</span><span class="o">.</span><span class="n">muted</span><span class="p">:</span>
+            <span class="n">kls</span><span class="o">.</span><span class="n">muted</span> <span class="o">=</span> <span class="bp">True</span>
+            <span class="n">signal</span><span class="o">.</span><span class="n">signal</span><span class="p">(</span><span class="n">signal</span><span class="o">.</span><span class="n">SIGTRAP</span><span class="p">,</span> <span class="n">signal</span><span class="o">.</span><span class="n">SIG_IGN</span><span class="p">)</span>
+    <span class="nd">@staticmethod</span>
+    <span class="k">def</span> <span class="nf">longjump</span><span class="p">():</span>
+        <span class="n">LongJump</span><span class="o">.</span><span class="n">parallel</span><span class="o">.</span><span class="n">_slavemon</span><span class="o">.</span><span class="n">kill_all</span><span class="p">()</span>
+        <span class="c"># first kill slaves, then master</span>
+        <span class="n">os</span><span class="o">.</span><span class="n">kill</span><span class="p">(</span><span class="n">os</span><span class="o">.</span><span class="n">getpid</span><span class="p">(),</span> <span class="n">signal</span><span class="o">.</span><span class="n">SIGTRAP</span><span class="p">)</span>
+
+        <span class="c"># this line will always run becuase</span>
+        <span class="c"># longjump is called from non-main thread</span>
+        <span class="c"># signal is trapped on main-thread.</span>
+        <span class="c"># will will ensure all Semaphores are released</span>
+        <span class="c"># so that the master won&#39;t stuck</span>
+        <span class="c"># as all slaves are dead, we just need to</span>
+        <span class="c"># increase the semaphores enough to raise the master</span>
+        <span class="n">LongJump</span><span class="o">.</span><span class="n">parallel</span><span class="o">.</span><span class="n">_cleanup</span><span class="p">()</span>
+
+
+<span class="k">class</span> <span class="nc">SlaveMonitor</span><span class="p">:</span>
+    <span class="k">def</span> <span class="nf">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">errormon</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">children</span> <span class="o">=</span> <span class="p">[]</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">errormon</span> <span class="o">=</span> <span class="n">errormon</span>
+
+    <span class="k">def</span> <span class="nf">main</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="n">n</span> <span class="o">=</span> <span class="mi">0</span>
+        <span class="n">N</span> <span class="o">=</span> <span class="nb">len</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">children</span><span class="p">)</span>
+        <span class="k">while</span> <span class="n">n</span> <span class="o">&lt;</span> <span class="n">N</span><span class="p">:</span>
+            <span class="n">pid</span><span class="p">,</span> <span class="n">status</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">wait</span><span class="p">()</span>
+            <span class="n">n</span> <span class="o">=</span> <span class="n">n</span> <span class="o">+</span> <span class="mi">1</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">children</span><span class="o">.</span><span class="n">remove</span><span class="p">(</span><span class="n">pid</span><span class="p">)</span>
+            <span class="k">if</span> <span class="n">status</span> <span class="o">!=</span> <span class="mi">0</span> <span class="ow">and</span> <span class="n">status</span> <span class="o">!=</span> <span class="n">signal</span><span class="o">.</span><span class="n">SIGTRAP</span><span class="p">:</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">errormon</span><span class="o">.</span><span class="n">slaveraise</span><span class="p">(</span><span class="n">ParallelException</span><span class="p">,</span> 
+                        <span class="n">ParallelException</span><span class="p">(</span><span class="s">&quot;slave </span><span class="si">%d</span><span class="s"> died unexpected: </span><span class="si">%d</span><span class="s">&quot;</span> <span class="o">%</span> <span class="p">(</span><span class="n">pid</span><span class="p">,</span>
+                            <span class="n">status</span><span class="p">)),</span> <span class="bp">None</span><span class="p">)</span>
+    <span class="k">def</span> <span class="nf">notechild</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">pid</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">children</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">pid</span><span class="p">)</span>
+    <span class="k">def</span> <span class="nf">kill_all</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;kill all slaves and reap the monitor &quot;&quot;&quot;</span>
+        <span class="k">for</span> <span class="n">pid</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">children</span><span class="p">:</span>
+            <span class="k">try</span><span class="p">:</span>
+                <span class="n">os</span><span class="o">.</span><span class="n">kill</span><span class="p">(</span><span class="n">pid</span><span class="p">,</span> <span class="n">signal</span><span class="o">.</span><span class="n">SIGTRAP</span><span class="p">)</span>
+            <span class="k">except</span> <span class="ne">OSError</span><span class="p">:</span>
+                <span class="k">continue</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">join</span><span class="p">()</span>
+
+    <span class="k">def</span> <span class="nf">start</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">thread</span> <span class="o">=</span> <span class="n">Thread</span><span class="p">(</span><span class="n">target</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">main</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">thread</span><span class="o">.</span><span class="n">daemon</span> <span class="o">=</span> <span class="bp">True</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">thread</span><span class="o">.</span><span class="n">start</span><span class="p">()</span>
+
+    <span class="k">def</span> <span class="nf">join</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot; master only &quot;&quot;&quot;</span>
+        <span class="k">try</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">thread</span><span class="o">.</span><span class="n">join</span><span class="p">()</span>
+        <span class="k">except</span><span class="p">:</span>
+            <span class="k">pass</span>
+        <span class="k">finally</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">thread</span> <span class="o">=</span> <span class="bp">None</span>
+
+<span class="k">class</span> <span class="nc">ErrorMonitor</span><span class="p">:</span>
+    <span class="k">def</span> <span class="nf">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">pipe</span> <span class="o">=</span> <span class="n">SimpleQueue</span><span class="p">()</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">message</span> <span class="o">=</span> <span class="bp">None</span>
+
+    <span class="k">def</span> <span class="nf">main</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">while</span> <span class="bp">True</span><span class="p">:</span>
+            <span class="n">message</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">pipe</span><span class="o">.</span><span class="n">get</span><span class="p">()</span>
+            <span class="k">if</span> <span class="n">message</span> <span class="o">!=</span> <span class="s">&#39;Q&#39;</span><span class="p">:</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">message</span> <span class="o">=</span> <span class="n">message</span><span class="p">[</span><span class="mi">1</span><span class="p">:]</span>
+                <span class="n">LongJump</span><span class="o">.</span><span class="n">longjump</span><span class="p">()</span>
+                <span class="k">break</span>
+            <span class="k">else</span><span class="p">:</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">pipe</span> <span class="o">=</span> <span class="bp">None</span>
+                <span class="k">break</span>
+                    
+    <span class="k">def</span> <span class="nf">haserror</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot; master only &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">message</span> <span class="ow">is</span> <span class="ow">not</span> <span class="bp">None</span>
+    <span class="k">def</span> <span class="nf">start</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot; master only &quot;&quot;&quot;</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">thread</span> <span class="o">=</span> <span class="n">Thread</span><span class="p">(</span><span class="n">target</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">main</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">thread</span><span class="o">.</span><span class="n">daemon</span> <span class="o">=</span> <span class="bp">True</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">thread</span><span class="o">.</span><span class="n">start</span><span class="p">()</span>
+    <span class="k">def</span> <span class="nf">join</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot; master only &quot;&quot;&quot;</span>
+        <span class="k">try</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">pipe</span><span class="o">.</span><span class="n">put</span><span class="p">(</span><span class="s">&#39;Q&#39;</span><span class="p">)</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">thread</span><span class="o">.</span><span class="n">join</span><span class="p">()</span>
+        <span class="k">except</span><span class="p">:</span>
+            <span class="k">pass</span>
+        <span class="k">finally</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">thread</span> <span class="o">=</span> <span class="bp">None</span>
+
+    <span class="k">def</span> <span class="nf">slaveraise</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="nb">type</span><span class="p">,</span> <span class="n">error</span><span class="p">,</span> <span class="n">traceback</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot; slave only &quot;&quot;&quot;</span>
+        <span class="n">message</span> <span class="o">=</span> <span class="s">&#39;E&#39;</span> <span class="o">*</span> <span class="mi">1</span> <span class="o">+</span> <span class="n">pickle</span><span class="o">.</span><span class="n">dumps</span><span class="p">((</span><span class="nb">type</span><span class="p">,</span>
+            <span class="s">&#39;&#39;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">tb</span><span class="o">.</span><span class="n">format_exception</span><span class="p">(</span><span class="nb">type</span><span class="p">,</span> <span class="n">error</span><span class="p">,</span> <span class="n">traceback</span><span class="p">))))</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">pipe</span> <span class="ow">is</span> <span class="ow">not</span> <span class="bp">None</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">pipe</span><span class="o">.</span><span class="n">put</span><span class="p">(</span><span class="n">message</span><span class="p">)</span>
+
+
+<div class="viewcode-block" id="Parallel"><a class="viewcode-back" href="../../sharedmem.parallel.html#sharedmem.parallel.Parallel">[docs]</a><span class="k">class</span> <span class="nc">Parallel</span><span class="p">(</span><span class="nb">object</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;</span>
+
+<span class="sd">        **kwargs: </span>
+<span class="sd">             num_threads: number of processes (default to OMP_NUM_THREADS)</span>
+
+<span class="sd">        *args:</span>
+<span class="sd">            Private(name=value, ....)</span>
+<span class="sd">            Shared(name=value, ....)</span>
+<span class="sd">            Reduction(ufunc, name=value, ....)</span>
+
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="k">def</span> <span class="nf">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="o">*</span><span class="n">args</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">num_threads</span> <span class="o">=</span> <span class="n">kwargs</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s">&#39;num_threads&#39;</span><span class="p">,</span> <span class="n">sharedmem</span><span class="o">.</span><span class="n">cpu_count</span><span class="p">())</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">var</span> <span class="o">=</span> <span class="n">Var</span><span class="p">()</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">rank</span> <span class="o">=</span> <span class="mi">0</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">master</span> <span class="o">=</span> <span class="bp">True</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_variables</span> <span class="o">=</span> <span class="n">args</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_children</span> <span class="o">=</span> <span class="p">[]</span>
+
+
+    <span class="k">def</span> <span class="nf">_fork</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">rank</span> <span class="o">=</span> <span class="mi">0</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">master</span> <span class="o">==</span> <span class="bp">True</span>
+        <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">num_threads</span> <span class="o">-</span> <span class="mi">1</span><span class="p">):</span>
+            <span class="k">if</span> <span class="ow">not</span> <span class="bp">self</span><span class="o">.</span><span class="n">master</span><span class="p">:</span> <span class="k">continue</span>
+            <span class="n">pid</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">fork</span><span class="p">()</span>
+            <span class="k">if</span> <span class="n">pid</span> <span class="o">!=</span> <span class="mi">0</span><span class="p">:</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">_slavemon</span><span class="o">.</span><span class="n">notechild</span><span class="p">(</span><span class="n">pid</span><span class="p">)</span>
+            <span class="k">else</span><span class="p">:</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">rank</span> <span class="o">=</span> <span class="n">i</span> <span class="o">+</span> <span class="mi">1</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">master</span> <span class="o">=</span> <span class="bp">False</span>
+
+    <span class="k">def</span> <span class="nf">_cleanup</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_barrier</span><span class="o">.</span><span class="n">abort</span><span class="p">()</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">critical</span><span class="o">.</span><span class="n">release</span><span class="p">()</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_StaticForLoop</span><span class="o">.</span><span class="n">abort</span><span class="p">()</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_DynamicForLoop</span><span class="o">.</span><span class="n">abort</span><span class="p">()</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_Ordered</span><span class="o">.</span><span class="n">abort</span><span class="p">()</span>
+
+    <span class="k">def</span> <span class="nf">__enter__</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">critical</span> <span class="o">=</span> <span class="n">Semaphore</span><span class="p">(</span><span class="mi">1</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_errormon</span> <span class="o">=</span> <span class="n">ErrorMonitor</span><span class="p">()</span> 
+        <span class="bp">self</span><span class="o">.</span><span class="n">_slavemon</span> <span class="o">=</span> <span class="n">SlaveMonitor</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_errormon</span><span class="p">)</span> 
+        <span class="n">shared</span> <span class="o">=</span> <span class="n">sharedmem</span><span class="o">.</span><span class="n">empty</span><span class="p">((),</span>
+                <span class="n">dtype</span><span class="o">=</span><span class="p">[</span>
+                    <span class="p">(</span><span class="s">&#39;ordered&#39;</span><span class="p">,</span> <span class="s">&#39;intp&#39;</span><span class="p">),</span>
+                    <span class="p">(</span><span class="s">&#39;barrier&#39;</span><span class="p">,</span> <span class="s">&#39;intp&#39;</span><span class="p">),</span>
+                    <span class="p">(</span><span class="s">&#39;dynamic&#39;</span><span class="p">,</span> <span class="s">&#39;intp&#39;</span><span class="p">),</span>
+                    <span class="p">])</span>
+
+        <span class="bp">self</span><span class="o">.</span><span class="n">_barrier</span> <span class="o">=</span> <span class="n">Barrier</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">num_threads</span><span class="p">,</span> <span class="n">shared</span><span class="p">[</span><span class="s">&#39;barrier&#39;</span><span class="p">][</span><span class="o">...</span><span class="p">])</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_Ordered</span> <span class="o">=</span> <span class="n">MetaOrdered</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">shared</span><span class="p">[</span><span class="s">&#39;ordered&#39;</span><span class="p">]</span> <span class="p">[</span><span class="o">...</span><span class="p">],</span> <span class="n">Semaphore</span><span class="p">(</span><span class="mi">1</span><span class="p">))</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_StaticForLoop</span> <span class="o">=</span> <span class="n">MetaStaticForLoop</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> 
+        <span class="bp">self</span><span class="o">.</span><span class="n">_DynamicForLoop</span> <span class="o">=</span> <span class="n">MetaDynamicForLoop</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">Semaphore</span><span class="p">(</span><span class="mi">1</span><span class="p">),</span> <span class="n">shared</span><span class="p">[</span><span class="s">&#39;dynamic&#39;</span><span class="p">][</span><span class="o">...</span><span class="p">])</span> 
+
+        <span class="k">for</span> <span class="n">param</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">_variables</span><span class="p">:</span>
+            <span class="n">param</span><span class="o">.</span><span class="n">beforefork</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_fork</span><span class="p">()</span>
+        <span class="k">for</span> <span class="n">param</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">_variables</span><span class="p">:</span>
+            <span class="n">param</span><span class="o">.</span><span class="n">afterfork</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">master</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_errormon</span><span class="o">.</span><span class="n">start</span><span class="p">()</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_slavemon</span><span class="o">.</span><span class="n">start</span><span class="p">()</span>
+            <span class="n">LongJump</span><span class="o">.</span><span class="n">listen</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span>
+        <span class="k">return</span> <span class="bp">self</span>
+
+    <span class="k">def</span> <span class="nf">__exitmaster__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="nb">type</span><span class="p">,</span> <span class="n">exception</span><span class="p">,</span> <span class="n">traceback</span><span class="p">):</span>
+        <span class="k">if</span> <span class="nb">type</span> <span class="ow">is</span> <span class="bp">None</span><span class="p">:</span>
+            <span class="c"># if any slaves raise error</span>
+            <span class="c"># _erromon will kill them</span>
+            <span class="c"># but master won&#39;t receive the LongJump signal</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_slavemon</span><span class="o">.</span><span class="n">join</span><span class="p">()</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_errormon</span><span class="o">.</span><span class="n">join</span><span class="p">()</span>
+            <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_errormon</span><span class="o">.</span><span class="n">message</span> <span class="ow">is</span> <span class="ow">not</span> <span class="bp">None</span><span class="p">:</span>
+                <span class="nb">type</span><span class="p">,</span> <span class="n">msg</span> <span class="o">=</span> <span class="n">pickle</span><span class="o">.</span><span class="n">loads</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_errormon</span><span class="o">.</span><span class="n">message</span><span class="p">)</span>
+                <span class="k">raise</span> <span class="nb">type</span><span class="p">(</span><span class="n">msg</span><span class="p">)</span>
+        <span class="k">elif</span> <span class="nb">type</span> <span class="ow">is</span> <span class="n">LongJump</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_errormon</span><span class="o">.</span><span class="n">join</span><span class="p">()</span>
+            <span class="nb">type</span><span class="p">,</span> <span class="n">msg</span> <span class="o">=</span> <span class="n">pickle</span><span class="o">.</span><span class="n">loads</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_errormon</span><span class="o">.</span><span class="n">message</span><span class="p">)</span>
+            <span class="k">raise</span> <span class="nb">type</span><span class="p">(</span><span class="n">msg</span><span class="p">)</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_slavemon</span><span class="o">.</span><span class="n">kill_all</span><span class="p">()</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_errormon</span><span class="o">.</span><span class="n">join</span><span class="p">()</span>
+
+        <span class="k">for</span> <span class="n">param</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">_variables</span><span class="p">:</span>
+            <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">param</span><span class="p">,</span> <span class="n">Reduction</span><span class="p">):</span>
+                <span class="n">param</span><span class="o">.</span><span class="n">reduce</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="nf">__exit__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="nb">type</span><span class="p">,</span> <span class="n">exception</span><span class="p">,</span> <span class="n">traceback</span><span class="p">):</span>
+        <span class="k">try</span><span class="p">:</span>
+            <span class="c"># since we are already here,</span>
+            <span class="c"># mute further longjumps that</span>
+            <span class="c"># may corrupt the unprotected</span>
+            <span class="c"># internal implementations.</span>
+            <span class="c"># example</span>
+            <span class="c"># if Thread.join() is inproperly</span>
+            <span class="c"># break by a async exception</span>
+            <span class="c"># next call to Thread.start() may block</span>
+            <span class="n">LongJump</span><span class="o">.</span><span class="n">mute</span><span class="p">()</span>
+            <span class="c"># if LongJump is raised </span>
+            <span class="c"># we simply try again</span>
+        <span class="k">except</span> <span class="n">LongJump</span> <span class="k">as</span> <span class="n">e</span><span class="p">:</span>
+            <span class="n">LongJump</span><span class="o">.</span><span class="n">mute</span><span class="p">()</span>
+
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">master</span><span class="p">:</span> 
+            <span class="bp">self</span><span class="o">.</span><span class="n">__exitmaster__</span><span class="p">(</span><span class="nb">type</span><span class="p">,</span> <span class="n">exception</span><span class="p">,</span> <span class="n">traceback</span><span class="p">)</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="c"># put error to the pipe</span>
+            <span class="k">if</span> <span class="nb">type</span> <span class="ow">is</span> <span class="ow">not</span> <span class="bp">None</span><span class="p">:</span>
+                <span class="c"># need to make sure each (per) message </span>
+                <span class="c"># won&#39;t block the pipe!</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">_errormon</span><span class="o">.</span><span class="n">slaveraise</span><span class="p">(</span><span class="nb">type</span><span class="p">,</span> <span class="n">exception</span><span class="p">,</span> <span class="n">traceback</span><span class="p">)</span>
+            <span class="n">os</span><span class="o">.</span><span class="n">_exit</span><span class="p">(</span><span class="mi">0</span><span class="p">)</span>
+        
+<div class="viewcode-block" id="Parallel.barrier"><a class="viewcode-back" href="../../sharedmem.parallel.html#sharedmem.parallel.Parallel.barrier">[docs]</a>    <span class="k">def</span> <span class="nf">barrier</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_barrier</span><span class="o">.</span><span class="n">wait</span><span class="p">()</span>
+</div>
+<div class="viewcode-block" id="Parallel.forloop"><a class="viewcode-back" href="../../sharedmem.parallel.html#sharedmem.parallel.Parallel.forloop">[docs]</a>    <span class="k">def</span> <span class="nf">forloop</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="nb">range</span><span class="p">,</span> <span class="n">ordered</span><span class="o">=</span><span class="bp">False</span><span class="p">,</span> <span class="n">schedule</span><span class="o">=</span><span class="p">(</span><span class="s">&#39;static&#39;</span><span class="p">,</span> <span class="mi">1</span><span class="p">)):</span>
+        <span class="sd">&quot;&quot;&quot; schedule can be</span>
+<span class="sd">            (sch, chunk) or sch;</span>
+<span class="sd">            sch is &#39;static&#39;, &#39;dynamic&#39; or &#39;guided&#39;.</span>
+
+<span class="sd">            chunk defaults to 1</span>
+
+<span class="sd">            if ordered, create an ordred</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+
+        <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">schedule</span><span class="p">,</span> <span class="nb">tuple</span><span class="p">):</span>
+            <span class="n">schedule</span><span class="p">,</span> <span class="n">chunk</span> <span class="o">=</span> <span class="n">schedule</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">chunk</span> <span class="o">=</span> <span class="bp">None</span>
+        <span class="k">if</span> <span class="n">schedule</span> <span class="o">==</span> <span class="s">&#39;static&#39;</span><span class="p">:</span>
+            <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_StaticForLoop</span><span class="p">(</span><span class="nb">range</span><span class="p">,</span> <span class="n">ordered</span><span class="p">,</span> <span class="n">chunk</span><span class="p">)</span>
+        <span class="k">elif</span> <span class="n">schedule</span> <span class="o">==</span> <span class="s">&#39;dynamic&#39;</span><span class="p">:</span>
+            <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_DynamicForLoop</span><span class="p">(</span><span class="nb">range</span><span class="p">,</span> <span class="n">ordered</span><span class="p">,</span> <span class="n">chunk</span><span class="p">,</span> <span class="n">guided</span><span class="o">=</span><span class="bp">False</span><span class="p">)</span>
+        <span class="k">elif</span> <span class="n">schedule</span> <span class="o">==</span> <span class="s">&#39;guided&#39;</span><span class="p">:</span>
+            <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_DynamicForLoop</span><span class="p">(</span><span class="nb">range</span><span class="p">,</span> <span class="n">ordered</span><span class="p">,</span> <span class="n">chunk</span><span class="p">,</span> <span class="n">guided</span><span class="o">=</span><span class="bp">True</span><span class="p">)</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="k">raise</span> <span class="s">&quot;schedule unknown&quot;</span>
+</div></div>
+<span class="k">class</span> <span class="nc">Barrier</span><span class="p">:</span>
+    <span class="sd">&quot;&quot;&quot; Excerpt from the Semaphore book by Downey 08 &quot;&quot;&quot;</span>
+    <span class="k">def</span> <span class="nf">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">n</span><span class="p">,</span> <span class="n">count</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">n</span> <span class="o">=</span> <span class="n">n</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">count</span> <span class="o">=</span> <span class="n">count</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">count</span><span class="p">[</span><span class="o">...</span><span class="p">]</span> <span class="o">=</span> <span class="mi">0</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">mutex</span> <span class="o">=</span> <span class="n">Semaphore</span><span class="p">(</span><span class="mi">1</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">turnstile</span> <span class="o">=</span> <span class="n">Semaphore</span><span class="p">(</span><span class="mi">0</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">turnstile2</span> <span class="o">=</span> <span class="n">Semaphore</span><span class="p">(</span><span class="mi">0</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="nf">abort</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot; ensure the master exit from Barrier &quot;&quot;&quot;</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">mutex</span><span class="o">.</span><span class="n">release</span><span class="p">()</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">turnstile</span><span class="o">.</span><span class="n">release</span><span class="p">()</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">mutex</span><span class="o">.</span><span class="n">release</span><span class="p">()</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">turnstile2</span><span class="o">.</span><span class="n">release</span><span class="p">()</span>
+
+    <span class="k">def</span> <span class="nf">phase1</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">try</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">mutex</span><span class="o">.</span><span class="n">acquire</span><span class="p">()</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">count</span><span class="p">[</span><span class="o">...</span><span class="p">]</span> <span class="o">+=</span> <span class="mi">1</span>
+            <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">count</span> <span class="o">==</span> <span class="bp">self</span><span class="o">.</span><span class="n">n</span><span class="p">:</span>
+                <span class="p">[</span><span class="bp">self</span><span class="o">.</span><span class="n">turnstile</span><span class="o">.</span><span class="n">release</span><span class="p">()</span> <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">n</span><span class="p">)]</span>
+        <span class="k">finally</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">mutex</span><span class="o">.</span><span class="n">release</span><span class="p">()</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">turnstile</span><span class="o">.</span><span class="n">acquire</span><span class="p">()</span>
+
+    <span class="k">def</span> <span class="nf">phase2</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">try</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">mutex</span><span class="o">.</span><span class="n">acquire</span><span class="p">()</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">count</span><span class="p">[</span><span class="o">...</span><span class="p">]</span> <span class="o">-=</span> <span class="mi">1</span>
+            <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">count</span> <span class="o">==</span> <span class="mi">0</span><span class="p">:</span>
+                <span class="p">[</span><span class="bp">self</span><span class="o">.</span><span class="n">turnstile2</span><span class="o">.</span><span class="n">release</span><span class="p">()</span> <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">n</span><span class="p">)]</span>
+        <span class="k">finally</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">mutex</span><span class="o">.</span><span class="n">release</span><span class="p">()</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">turnstile2</span><span class="o">.</span><span class="n">acquire</span><span class="p">()</span>
+    <span class="k">def</span> <span class="nf">wait</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">n</span> <span class="o">==</span> <span class="mi">0</span><span class="p">:</span> <span class="k">return</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">phase1</span><span class="p">()</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">phase2</span><span class="p">()</span>
+
+<span class="k">def</span> <span class="nf">MetaDynamicForLoop</span><span class="p">(</span><span class="n">parallel</span><span class="p">,</span> <span class="n">mutex</span><span class="p">,</span> <span class="n">dynamiciter</span><span class="p">):</span>
+    <span class="k">class</span> <span class="nc">DynamicForLoop</span><span class="p">:</span>
+        <span class="k">def</span> <span class="nf">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="nb">range</span><span class="p">,</span> <span class="n">ordered</span><span class="p">,</span> <span class="n">chunk</span><span class="p">,</span> <span class="n">guided</span><span class="p">):</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">range</span> <span class="o">=</span> <span class="nb">range</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">iter</span> <span class="o">=</span> <span class="n">numpy</span><span class="o">.</span><span class="n">empty</span><span class="p">((),</span> <span class="n">dtype</span><span class="o">=</span><span class="s">&#39;intp&#39;</span><span class="p">)</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">iter</span><span class="p">[</span><span class="o">...</span><span class="p">]</span> <span class="o">=</span> <span class="mi">0</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">guided</span> <span class="o">=</span> <span class="n">guided</span>
+            <span class="k">if</span> <span class="n">chunk</span> <span class="ow">is</span> <span class="bp">None</span><span class="p">:</span> <span class="n">chunk</span> <span class="o">=</span> <span class="mi">1</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">chunk</span> <span class="o">=</span> <span class="n">chunk</span>
+            <span class="k">if</span> <span class="n">parallel</span><span class="o">.</span><span class="n">master</span><span class="p">:</span>
+                <span class="n">dynamiciter</span><span class="p">[</span><span class="o">...</span><span class="p">]</span> <span class="o">=</span> <span class="mi">0</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">_haserror</span> <span class="o">=</span> <span class="n">parallel</span><span class="o">.</span><span class="n">_errormon</span><span class="o">.</span><span class="n">haserror</span>
+            <span class="k">else</span><span class="p">:</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">_haserror</span> <span class="o">=</span> <span class="k">lambda</span> <span class="p">:</span> <span class="bp">False</span>
+            <span class="k">if</span> <span class="n">ordered</span><span class="p">:</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">ordered</span> <span class="o">=</span> <span class="n">parallel</span><span class="o">.</span><span class="n">_Ordered</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">iter</span><span class="p">)</span>
+            <span class="k">else</span><span class="p">:</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">ordered</span> <span class="o">=</span> <span class="bp">None</span>
+
+            <span class="c"># this is important, to</span>
+            <span class="c"># make sure dynamiciter is updated to 0</span>
+            <span class="n">parallel</span><span class="o">.</span><span class="n">barrier</span><span class="p">()</span>
+
+        <span class="nd">@classmethod</span>
+        <span class="k">def</span> <span class="nf">abort</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+            <span class="n">mutex</span><span class="o">.</span><span class="n">release</span><span class="p">()</span>
+
+        <span class="k">def</span> <span class="nf">__iter__</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+            <span class="n">N</span> <span class="o">=</span> <span class="nb">len</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">range</span><span class="p">)</span>
+            <span class="k">while</span> <span class="bp">True</span><span class="p">:</span>
+                <span class="k">try</span><span class="p">:</span>
+                    <span class="n">mutex</span><span class="o">.</span><span class="n">acquire</span><span class="p">()</span>
+                    <span class="c"># get the unit of work</span>
+                    <span class="k">if</span> <span class="ow">not</span> <span class="bp">self</span><span class="o">.</span><span class="n">guided</span><span class="p">:</span>
+                        <span class="n">newchunk</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">chunk</span>
+                    <span class="k">else</span><span class="p">:</span>
+                        <span class="n">newchunk</span> <span class="o">=</span> <span class="p">(</span><span class="n">N</span> <span class="o">-</span> <span class="n">dynamiciter</span><span class="p">)</span> <span class="o">//</span> \
+                                <span class="n">parallel</span><span class="o">.</span><span class="n">num_threads</span>
+                        <span class="k">if</span> <span class="n">newchunk</span> <span class="o">&lt;</span> <span class="bp">self</span><span class="o">.</span><span class="n">chunk</span><span class="p">:</span> 
+                            <span class="n">newchunk</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">chunk</span>
+                    <span class="bp">self</span><span class="o">.</span><span class="n">iter</span><span class="p">[</span><span class="o">...</span><span class="p">]</span> <span class="o">=</span> <span class="n">dynamiciter</span>
+                    <span class="n">dynamiciter</span><span class="p">[</span><span class="o">...</span><span class="p">]</span> <span class="o">+=</span> <span class="n">newchunk</span>
+                <span class="k">finally</span><span class="p">:</span>
+                    <span class="n">mutex</span><span class="o">.</span><span class="n">release</span><span class="p">()</span>
+
+                <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">iter</span><span class="p">[</span><span class="o">...</span><span class="p">]</span> <span class="o">&gt;=</span> <span class="n">N</span><span class="p">:</span>
+                    <span class="k">break</span>
+                <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">newchunk</span><span class="p">):</span>
+                    <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">iter</span> <span class="o">&gt;=</span> <span class="n">N</span><span class="p">:</span> <span class="k">break</span>
+                    <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">ordered</span> <span class="ow">is</span> <span class="bp">None</span><span class="p">:</span>
+                        <span class="k">yield</span> <span class="bp">self</span><span class="o">.</span><span class="n">range</span><span class="p">[</span><span class="bp">self</span><span class="o">.</span><span class="n">iter</span><span class="p">]</span>
+                    <span class="k">else</span><span class="p">:</span>
+                        <span class="k">yield</span> <span class="bp">self</span><span class="o">.</span><span class="n">range</span><span class="p">[</span><span class="bp">self</span><span class="o">.</span><span class="n">iter</span><span class="p">],</span> <span class="bp">self</span><span class="o">.</span><span class="n">ordered</span>
+                    <span class="bp">self</span><span class="o">.</span><span class="n">iter</span><span class="p">[</span><span class="o">...</span><span class="p">]</span> <span class="o">+=</span> <span class="mi">1</span>
+                <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_haserror</span><span class="p">():</span>
+                    <span class="k">break</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_haserror</span> <span class="o">=</span> <span class="bp">None</span>
+    <span class="k">return</span> <span class="n">DynamicForLoop</span>
+
+<span class="k">def</span> <span class="nf">MetaStaticForLoop</span><span class="p">(</span><span class="n">parallel</span><span class="p">):</span>
+    <span class="k">class</span> <span class="nc">ForLoop</span><span class="p">:</span>
+        <span class="k">def</span> <span class="nf">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="nb">range</span><span class="p">,</span> <span class="n">ordered</span><span class="p">,</span> <span class="n">chunk</span><span class="p">):</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">start</span> <span class="o">=</span> <span class="n">parallel</span><span class="o">.</span><span class="n">rank</span> <span class="o">*</span> <span class="nb">len</span><span class="p">(</span><span class="nb">range</span><span class="p">)</span> <span class="o">//</span> <span class="n">parallel</span><span class="o">.</span><span class="n">num_threads</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">end</span> <span class="o">=</span> <span class="p">(</span><span class="n">parallel</span><span class="o">.</span><span class="n">rank</span> <span class="o">+</span> <span class="mi">1</span><span class="p">)</span><span class="o">*</span> <span class="nb">len</span><span class="p">(</span><span class="nb">range</span><span class="p">)</span> <span class="o">//</span> <span class="n">parallel</span><span class="o">.</span><span class="n">num_threads</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">range</span> <span class="o">=</span> <span class="nb">range</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">iter</span> <span class="o">=</span> <span class="n">numpy</span><span class="o">.</span><span class="n">empty</span><span class="p">((),</span> <span class="n">dtype</span><span class="o">=</span><span class="s">&#39;intp&#39;</span><span class="p">)</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">iter</span><span class="p">[</span><span class="o">...</span><span class="p">]</span> <span class="o">=</span> <span class="mi">0</span>
+            <span class="k">if</span> <span class="n">parallel</span><span class="o">.</span><span class="n">master</span><span class="p">:</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">_haserror</span> <span class="o">=</span> <span class="n">parallel</span><span class="o">.</span><span class="n">_errormon</span><span class="o">.</span><span class="n">haserror</span>
+            <span class="k">else</span><span class="p">:</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">_haserror</span> <span class="o">=</span> <span class="k">lambda</span> <span class="p">:</span> <span class="bp">False</span>
+            <span class="k">if</span> <span class="n">ordered</span><span class="p">:</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">ordered</span> <span class="o">=</span> <span class="n">parallel</span><span class="o">.</span><span class="n">_Ordered</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">iter</span><span class="p">)</span>
+            <span class="k">else</span><span class="p">:</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">ordered</span> <span class="o">=</span> <span class="bp">None</span>
+        <span class="nd">@classmethod</span>
+        <span class="k">def</span> <span class="nf">abort</span><span class="p">(</span><span class="n">kls</span><span class="p">):</span>
+            <span class="k">pass</span>
+        <span class="k">def</span> <span class="nf">__iter__</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+            <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">start</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">end</span><span class="p">):</span>
+                <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_haserror</span><span class="p">():</span>
+                    <span class="k">break</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">iter</span><span class="p">[</span><span class="o">...</span><span class="p">]</span> <span class="o">=</span> <span class="n">i</span>
+                <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">ordered</span> <span class="ow">is</span> <span class="bp">None</span><span class="p">:</span>
+                    <span class="k">yield</span> <span class="bp">self</span><span class="o">.</span><span class="n">range</span><span class="p">[</span><span class="n">i</span><span class="p">]</span>
+                <span class="k">else</span><span class="p">:</span>
+                    <span class="k">yield</span> <span class="bp">self</span><span class="o">.</span><span class="n">range</span><span class="p">[</span><span class="n">i</span><span class="p">],</span> <span class="bp">self</span><span class="o">.</span><span class="n">ordered</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_haserror</span> <span class="o">=</span> <span class="bp">None</span>
+    <span class="k">return</span> <span class="n">ForLoop</span>
+
+<span class="k">def</span> <span class="nf">MetaOrdered</span><span class="p">(</span><span class="n">parallel</span><span class="p">,</span> <span class="n">done</span><span class="p">,</span> <span class="n">turnstile</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;meta class for Ordered construct.&quot;&quot;&quot;</span>
+    <span class="k">class</span> <span class="nc">Ordered</span><span class="p">:</span>
+        <span class="k">def</span> <span class="nf">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">iterref</span><span class="p">):</span>
+            <span class="k">if</span> <span class="n">parallel</span><span class="o">.</span><span class="n">master</span><span class="p">:</span>
+                <span class="n">done</span><span class="p">[</span><span class="o">...</span><span class="p">]</span> <span class="o">=</span> <span class="mi">0</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">iterref</span> <span class="o">=</span> <span class="n">iterref</span>
+            <span class="n">parallel</span><span class="o">.</span><span class="n">barrier</span><span class="p">()</span>
+
+        <span class="nd">@classmethod</span>
+        <span class="k">def</span> <span class="nf">abort</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+            <span class="n">turnstile</span><span class="o">.</span><span class="n">release</span><span class="p">()</span>
+
+        <span class="k">def</span> <span class="nf">__enter__</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+            <span class="k">while</span> <span class="bp">self</span><span class="o">.</span><span class="n">iterref</span> <span class="o">!=</span> <span class="n">done</span><span class="p">:</span>
+                <span class="k">pass</span>
+            <span class="n">turnstile</span><span class="o">.</span><span class="n">acquire</span><span class="p">()</span>
+            <span class="k">return</span> <span class="bp">self</span>
+        <span class="k">def</span> <span class="nf">__exit__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="o">*</span><span class="n">args</span><span class="p">):</span>
+            <span class="n">done</span><span class="p">[</span><span class="o">...</span><span class="p">]</span> <span class="o">+=</span> <span class="mi">1</span>
+            <span class="n">turnstile</span><span class="o">.</span><span class="n">release</span><span class="p">()</span>
+    <span class="k">return</span> <span class="n">Ordered</span>
+
+<span class="k">class</span> <span class="nc">Var</span><span class="p">(</span><span class="nb">object</span><span class="p">):</span>
+    <span class="k">def</span> <span class="nf">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">__dict__</span><span class="p">[</span><span class="s">&#39;map&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="p">{}</span>
+    <span class="k">def</span> <span class="nf">_register</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">varset</span><span class="p">,</span> <span class="n">index</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">__dict__</span><span class="p">[</span><span class="s">&#39;map&#39;</span><span class="p">][</span><span class="n">index</span><span class="p">]</span> <span class="o">=</span> <span class="n">varset</span>
+    <span class="k">def</span> <span class="nf">__getattr__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">index</span><span class="p">):</span>
+        <span class="nb">set</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">__dict__</span><span class="p">[</span><span class="s">&#39;map&#39;</span><span class="p">][</span><span class="n">index</span><span class="p">]</span>
+        <span class="k">return</span> <span class="nb">set</span><span class="p">[</span><span class="n">index</span><span class="p">]</span>
+    <span class="k">def</span> <span class="nf">__setattr__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">index</span><span class="p">,</span> <span class="n">value</span><span class="p">):</span>
+        <span class="nb">set</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">__dict__</span><span class="p">[</span><span class="s">&#39;map&#39;</span><span class="p">][</span><span class="n">index</span><span class="p">]</span>
+        <span class="nb">set</span><span class="p">[</span><span class="n">index</span><span class="p">]</span> <span class="o">=</span> <span class="n">value</span>
+
+<span class="k">class</span> <span class="nc">VarSet</span><span class="p">(</span><span class="nb">object</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot; A Set of variables, used to initialize a Parallel</span>
+<span class="sd">        section. </span>
+<span class="sd">        </span>
+<span class="sd">        override before fork and afterfork in subclasses</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="k">def</span> <span class="nf">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_input</span> <span class="o">=</span> <span class="p">[(</span><span class="n">key</span><span class="p">,</span> <span class="n">numpy</span><span class="o">.</span><span class="n">asarray</span><span class="p">(</span><span class="n">kwargs</span><span class="p">[</span><span class="n">key</span><span class="p">]))</span>
+                <span class="k">for</span> <span class="n">key</span> <span class="ow">in</span> <span class="n">kwargs</span><span class="p">]</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_dtype</span> <span class="o">=</span> <span class="p">[(</span><span class="n">key</span><span class="p">,</span> <span class="p">(</span><span class="n">item</span><span class="o">.</span><span class="n">dtype</span><span class="p">,</span> <span class="n">item</span><span class="o">.</span><span class="n">shape</span><span class="p">))</span> <span class="k">for</span> <span class="n">key</span><span class="p">,</span> <span class="n">item</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">_input</span><span class="p">]</span>
+
+    <span class="k">def</span> <span class="nf">beforefork</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">parallel</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot; allocate self.data with dtype &quot;&quot;&quot;</span>
+        <span class="k">pass</span>
+
+    <span class="k">def</span> <span class="nf">afterfork</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">parallel</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_input</span> <span class="o">=</span> <span class="bp">None</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_dtype</span> <span class="o">=</span> <span class="bp">None</span>
+        <span class="k">for</span> <span class="n">key</span> <span class="ow">in</span> <span class="bp">self</span><span class="p">:</span>
+            <span class="n">parallel</span><span class="o">.</span><span class="n">var</span><span class="o">.</span><span class="n">_register</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">key</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="nf">__iter__</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">return</span> <span class="nb">iter</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">data</span><span class="o">.</span><span class="n">dtype</span><span class="o">.</span><span class="n">names</span><span class="p">)</span>
+    <span class="k">def</span> <span class="nf">__getitem__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">index</span><span class="p">):</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">data</span><span class="p">[</span><span class="n">index</span><span class="p">]</span>
+    <span class="k">def</span> <span class="nf">__setitem__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">index</span><span class="p">,</span> <span class="n">value</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">data</span><span class="p">[</span><span class="n">index</span><span class="p">][</span><span class="o">...</span><span class="p">]</span> <span class="o">=</span> <span class="n">value</span>
+
+<span class="k">class</span> <span class="nc">Shared</span><span class="p">(</span><span class="n">VarSet</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;A set of shared variables.</span>
+<span class="sd">       </span>
+<span class="sd">       Shared(varname=value)</span>
+<span class="sd">       if specific type is needed, eg, int8, </span>
+<span class="sd">       use numpy.int8.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="k">def</span> <span class="nf">beforefork</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">parallel</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">data</span> <span class="o">=</span> <span class="n">sharedmem</span><span class="o">.</span><span class="n">empty</span><span class="p">((),</span> <span class="bp">self</span><span class="o">.</span><span class="n">_dtype</span><span class="p">)</span>
+        <span class="k">for</span> <span class="n">key</span><span class="p">,</span> <span class="n">value</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">_input</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">data</span><span class="p">[</span><span class="n">key</span><span class="p">]</span> <span class="o">=</span> <span class="n">value</span>
+
+<span class="k">class</span> <span class="nc">Private</span><span class="p">(</span><span class="n">VarSet</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;A set of private variables&quot;&quot;&quot;</span>
+    <span class="k">def</span> <span class="nf">beforefork</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">parallel</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">data</span> <span class="o">=</span> <span class="n">numpy</span><span class="o">.</span><span class="n">empty</span><span class="p">((),</span> <span class="bp">self</span><span class="o">.</span><span class="n">_dtype</span><span class="p">)</span>
+        <span class="k">for</span> <span class="n">key</span><span class="p">,</span> <span class="n">value</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">_input</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">data</span><span class="p">[</span><span class="n">key</span><span class="p">]</span> <span class="o">=</span> <span class="n">value</span>
+
+<span class="k">class</span> <span class="nc">Reduction</span><span class="p">(</span><span class="n">VarSet</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;A set of reduction variables</span>
+<span class="sd">        all variables will be reduced by the same ufunc</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="k">def</span> <span class="nf">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">ufunc</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_ufunc</span> <span class="o">=</span> <span class="n">ufunc</span>
+        <span class="n">VarSet</span><span class="o">.</span><span class="n">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="nf">beforefork</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">parallel</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_fulldata</span> <span class="o">=</span> <span class="n">sharedmem</span><span class="o">.</span><span class="n">empty</span><span class="p">(</span><span class="n">parallel</span><span class="o">.</span><span class="n">num_threads</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">_dtype</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="nf">afterfork</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">parallel</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">data</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_fulldata</span><span class="p">[</span><span class="n">parallel</span><span class="o">.</span><span class="n">rank</span><span class="p">]</span>
+        <span class="k">for</span> <span class="n">key</span><span class="p">,</span> <span class="n">value</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">_input</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">data</span><span class="p">[</span><span class="n">key</span><span class="p">]</span> <span class="o">=</span> <span class="n">value</span>
+        <span class="n">VarSet</span><span class="o">.</span><span class="n">afterfork</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">parallel</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="nf">reduce</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">parallel</span><span class="p">):</span>
+        <span class="k">if</span> <span class="n">parallel</span><span class="o">.</span><span class="n">master</span><span class="p">:</span>
+            <span class="k">for</span> <span class="n">key</span> <span class="ow">in</span> <span class="bp">self</span><span class="p">:</span>
+                <span class="bp">self</span><span class="p">[</span><span class="n">key</span><span class="p">]</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_ufunc</span><span class="o">.</span><span class="n">reduce</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_fulldata</span><span class="p">[</span><span class="n">key</span><span class="p">],</span> <span class="n">axis</span><span class="o">=</span><span class="mi">0</span><span class="p">)</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">data</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_fulldata</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">view</span><span class="p">(</span><span class="nb">type</span><span class="o">=</span><span class="n">Shared</span><span class="p">)</span>
+
+<span class="k">def</span> <span class="nf">testraiseordered</span><span class="p">():</span>
+    <span class="k">for</span> <span class="n">schedule</span> <span class="ow">in</span> <span class="p">[</span><span class="s">&#39;static&#39;</span><span class="p">,</span> <span class="s">&#39;dynamic&#39;</span><span class="p">,</span> <span class="s">&#39;guided&#39;</span><span class="p">]:</span>
+        <span class="k">try</span><span class="p">:</span>
+            <span class="k">with</span> <span class="n">Parallel</span><span class="p">(</span>
+                    <span class="n">Reduction</span><span class="p">(</span><span class="n">numpy</span><span class="o">.</span><span class="n">add</span><span class="p">,</span> <span class="n">a</span><span class="o">=</span><span class="p">[</span><span class="mi">0</span><span class="p">,</span> <span class="mi">0</span><span class="p">])</span>
+                    <span class="p">)</span> <span class="k">as</span> <span class="n">p</span><span class="p">:</span>
+                <span class="k">for</span> <span class="n">i</span><span class="p">,</span> <span class="n">ordered</span> <span class="ow">in</span> <span class="n">p</span><span class="o">.</span><span class="n">forloop</span><span class="p">(</span><span class="nb">range</span><span class="p">(</span><span class="mi">20</span><span class="p">),</span> 
+                        <span class="n">ordered</span><span class="o">=</span><span class="bp">True</span><span class="p">,</span> <span class="n">schedule</span><span class="o">=</span><span class="n">schedule</span><span class="p">):</span>
+                    <span class="k">with</span> <span class="n">ordered</span><span class="p">:</span>
+                        <span class="n">p</span><span class="o">.</span><span class="n">var</span><span class="o">.</span><span class="n">a</span> <span class="o">+=</span> <span class="n">numpy</span><span class="o">.</span><span class="n">array</span><span class="p">([</span><span class="n">i</span><span class="p">,</span> <span class="n">i</span> <span class="o">*</span> <span class="mi">10</span><span class="p">])</span>
+                        <span class="k">if</span> <span class="n">i</span> <span class="o">==</span> <span class="mi">19</span><span class="p">:</span>
+                            <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="s">&#39;raised at i == 19&#39;</span><span class="p">)</span>
+            <span class="k">assert</span> <span class="bp">False</span>
+        <span class="k">except</span> <span class="ne">ValueError</span> <span class="k">as</span> <span class="n">e</span><span class="p">:</span>
+            <span class="k">pass</span>
+
+<span class="k">def</span> <span class="nf">testraisecritical</span><span class="p">():</span>
+    <span class="k">for</span> <span class="n">schedule</span> <span class="ow">in</span> <span class="p">[</span><span class="s">&#39;static&#39;</span><span class="p">,</span> <span class="s">&#39;dynamic&#39;</span><span class="p">,</span> <span class="s">&#39;guided&#39;</span><span class="p">]:</span>
+        <span class="k">try</span><span class="p">:</span>
+            <span class="k">with</span> <span class="n">Parallel</span><span class="p">(</span>
+                    <span class="n">Reduction</span><span class="p">(</span><span class="n">numpy</span><span class="o">.</span><span class="n">add</span><span class="p">,</span> <span class="n">a</span><span class="o">=</span><span class="p">[</span><span class="mi">0</span><span class="p">,</span> <span class="mi">0</span><span class="p">])</span>
+                    <span class="p">)</span> <span class="k">as</span> <span class="n">p</span><span class="p">:</span>
+                <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="n">p</span><span class="o">.</span><span class="n">forloop</span><span class="p">(</span><span class="nb">range</span><span class="p">(</span><span class="mi">20</span><span class="p">),</span> <span class="n">schedule</span><span class="o">=</span><span class="n">schedule</span><span class="p">):</span>
+                    <span class="k">with</span> <span class="n">p</span><span class="o">.</span><span class="n">critical</span><span class="p">:</span>
+                        <span class="n">p</span><span class="o">.</span><span class="n">var</span><span class="o">.</span><span class="n">a</span> <span class="o">+=</span> <span class="n">numpy</span><span class="o">.</span><span class="n">array</span><span class="p">([</span><span class="n">i</span><span class="p">,</span> <span class="n">i</span> <span class="o">*</span> <span class="mi">10</span><span class="p">])</span>
+                        <span class="k">if</span> <span class="n">i</span> <span class="o">==</span> <span class="mi">19</span><span class="p">:</span>
+                            <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="s">&#39;raised at i == 19&#39;</span><span class="p">)</span>
+            <span class="k">assert</span> <span class="bp">False</span>
+        <span class="k">except</span> <span class="ne">ValueError</span> <span class="k">as</span> <span class="n">e</span><span class="p">:</span>
+            <span class="k">pass</span>
+
+<span class="k">def</span> <span class="nf">testreduction</span><span class="p">():</span>
+    <span class="k">for</span> <span class="n">schedule</span> <span class="ow">in</span> <span class="p">[</span><span class="s">&#39;static&#39;</span><span class="p">,</span> <span class="s">&#39;dynamic&#39;</span><span class="p">,</span> <span class="s">&#39;guided&#39;</span><span class="p">]:</span>
+        <span class="k">with</span> <span class="n">Parallel</span><span class="p">(</span>
+                <span class="n">Reduction</span><span class="p">(</span><span class="n">numpy</span><span class="o">.</span><span class="n">add</span><span class="p">,</span> <span class="n">a</span><span class="o">=</span><span class="p">[</span><span class="mi">0</span><span class="p">,</span> <span class="mi">0</span><span class="p">])</span>
+                <span class="p">)</span> <span class="k">as</span> <span class="n">p</span><span class="p">:</span>
+            <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="n">p</span><span class="o">.</span><span class="n">forloop</span><span class="p">(</span><span class="nb">range</span><span class="p">(</span><span class="mi">20</span><span class="p">),</span> <span class="n">schedule</span><span class="o">=</span><span class="n">schedule</span><span class="p">)</span> <span class="p">:</span>
+                <span class="n">p</span><span class="o">.</span><span class="n">var</span><span class="o">.</span><span class="n">a</span> <span class="o">+=</span> <span class="n">numpy</span><span class="o">.</span><span class="n">array</span><span class="p">([</span><span class="n">i</span><span class="p">,</span> <span class="n">i</span> <span class="o">*</span> <span class="mi">10</span><span class="p">])</span>
+        <span class="k">assert</span> <span class="p">(</span><span class="n">p</span><span class="o">.</span><span class="n">var</span><span class="o">.</span><span class="n">a</span> <span class="o">==</span> <span class="p">[</span><span class="mi">190</span><span class="p">,</span> <span class="mi">1900</span><span class="p">])</span><span class="o">.</span><span class="n">all</span><span class="p">()</span>
+
+<span class="k">def</span> <span class="nf">testprivate</span><span class="p">():</span>
+    <span class="k">for</span> <span class="n">schedule</span> <span class="ow">in</span> <span class="p">[</span><span class="s">&#39;static&#39;</span><span class="p">,</span> <span class="s">&#39;dynamic&#39;</span><span class="p">,</span> <span class="s">&#39;guided&#39;</span><span class="p">]:</span>
+        <span class="n">truevalue</span> <span class="o">=</span> <span class="n">numpy</span><span class="o">.</span><span class="n">zeros</span><span class="p">(</span><span class="mi">2</span><span class="p">)</span>
+        <span class="k">with</span> <span class="n">Parallel</span><span class="p">(</span>
+                <span class="n">Private</span><span class="p">(</span><span class="n">a</span><span class="o">=</span><span class="p">[</span><span class="mi">0</span><span class="p">,</span> <span class="mi">0</span><span class="p">])</span>
+                <span class="p">)</span> <span class="k">as</span> <span class="n">p</span><span class="p">:</span>
+            <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="n">p</span><span class="o">.</span><span class="n">forloop</span><span class="p">(</span><span class="nb">range</span><span class="p">(</span><span class="mi">100</span><span class="p">),</span> <span class="n">schedule</span><span class="o">=</span><span class="n">schedule</span><span class="p">):</span>
+                <span class="n">p</span><span class="o">.</span><span class="n">var</span><span class="o">.</span><span class="n">a</span> <span class="o">+=</span> <span class="n">numpy</span><span class="o">.</span><span class="n">array</span><span class="p">([</span><span class="n">i</span><span class="p">,</span> <span class="n">i</span> <span class="o">*</span> <span class="mi">10</span><span class="p">])</span>
+                <span class="k">if</span> <span class="n">p</span><span class="o">.</span><span class="n">master</span><span class="p">:</span> 
+                    <span class="n">truevalue</span> <span class="o">+=</span> <span class="n">numpy</span><span class="o">.</span><span class="n">array</span><span class="p">([</span><span class="n">i</span><span class="p">,</span> <span class="n">i</span> <span class="o">*</span> <span class="mi">10</span><span class="p">])</span>
+        <span class="k">assert</span> <span class="p">(</span><span class="n">p</span><span class="o">.</span><span class="n">var</span><span class="o">.</span><span class="n">a</span> <span class="o">==</span> <span class="n">truevalue</span><span class="p">)</span><span class="o">.</span><span class="n">all</span><span class="p">()</span>
+
+<span class="k">def</span> <span class="nf">testshared</span><span class="p">():</span>
+    <span class="k">for</span> <span class="n">schedule</span> <span class="ow">in</span> <span class="p">[</span><span class="s">&#39;static&#39;</span><span class="p">,</span> <span class="s">&#39;dynamic&#39;</span><span class="p">,</span> <span class="s">&#39;guided&#39;</span><span class="p">]:</span>
+        <span class="k">with</span> <span class="n">Parallel</span><span class="p">(</span>
+                <span class="n">Shared</span><span class="p">(</span><span class="n">a</span><span class="o">=</span><span class="p">[</span><span class="mi">0</span><span class="p">,</span> <span class="mi">0</span><span class="p">]),</span>
+                <span class="n">Reduction</span><span class="p">(</span><span class="n">numpy</span><span class="o">.</span><span class="n">add</span><span class="p">,</span> <span class="n">b</span><span class="o">=</span><span class="p">[</span><span class="mi">0</span><span class="p">,</span> <span class="mi">0</span><span class="p">])</span>
+                <span class="p">)</span> <span class="k">as</span> <span class="n">p</span><span class="p">:</span>
+            <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="n">p</span><span class="o">.</span><span class="n">forloop</span><span class="p">(</span><span class="nb">range</span><span class="p">(</span><span class="mi">100</span><span class="p">),</span> <span class="n">schedule</span><span class="o">=</span><span class="n">schedule</span><span class="p">):</span>
+                <span class="k">with</span> <span class="n">p</span><span class="o">.</span><span class="n">critical</span><span class="p">:</span>
+                    <span class="n">p</span><span class="o">.</span><span class="n">var</span><span class="o">.</span><span class="n">a</span> <span class="o">+=</span> <span class="n">numpy</span><span class="o">.</span><span class="n">array</span><span class="p">([</span><span class="n">i</span><span class="p">,</span> <span class="n">i</span> <span class="o">*</span> <span class="mi">10</span><span class="p">])</span>
+                <span class="n">p</span><span class="o">.</span><span class="n">var</span><span class="o">.</span><span class="n">b</span> <span class="o">+=</span> <span class="n">numpy</span><span class="o">.</span><span class="n">array</span><span class="p">([</span><span class="n">i</span><span class="p">,</span> <span class="n">i</span> <span class="o">*</span> <span class="mi">10</span><span class="p">])</span> 
+            
+        <span class="k">assert</span> <span class="p">(</span><span class="n">p</span><span class="o">.</span><span class="n">var</span><span class="o">.</span><span class="n">a</span> <span class="o">==</span> <span class="n">p</span><span class="o">.</span><span class="n">var</span><span class="o">.</span><span class="n">b</span><span class="p">)</span><span class="o">.</span><span class="n">all</span><span class="p">()</span>
+
+<span class="k">def</span> <span class="nf">testbarrier</span><span class="p">():</span>
+    <span class="n">now</span> <span class="o">=</span> <span class="n">time</span><span class="o">.</span><span class="n">time</span><span class="p">()</span>
+    <span class="k">with</span> <span class="n">Parallel</span><span class="p">(</span>
+            <span class="n">Shared</span><span class="p">(</span><span class="n">a</span><span class="o">=</span><span class="p">[</span><span class="mi">0</span><span class="p">,</span> <span class="mi">0</span><span class="p">]),</span>
+            <span class="n">Reduction</span><span class="p">(</span><span class="n">numpy</span><span class="o">.</span><span class="n">add</span><span class="p">,</span> <span class="n">b</span><span class="o">=</span><span class="p">[</span><span class="mi">0</span><span class="p">,</span> <span class="mi">0</span><span class="p">])</span>
+            <span class="p">)</span> <span class="k">as</span> <span class="n">p</span><span class="p">:</span>
+        <span class="c">#time.sleep(p.rank * 0.01)</span>
+        <span class="n">p</span><span class="o">.</span><span class="n">barrier</span><span class="p">()</span>
+        <span class="n">p</span><span class="o">.</span><span class="n">barrier</span><span class="p">()</span>
+        
+<span class="k">def</span> <span class="nf">testkill</span><span class="p">():</span>
+    <span class="k">try</span><span class="p">:</span>
+        <span class="k">with</span> <span class="n">Parallel</span><span class="p">(</span>
+                <span class="n">Shared</span><span class="p">(</span><span class="n">a</span><span class="o">=</span><span class="p">[</span><span class="mi">0</span><span class="p">,</span> <span class="mi">0</span><span class="p">]),</span>
+                <span class="n">Reduction</span><span class="p">(</span><span class="n">numpy</span><span class="o">.</span><span class="n">add</span><span class="p">,</span> <span class="n">b</span><span class="o">=</span><span class="p">[</span><span class="mi">0</span><span class="p">,</span> <span class="mi">0</span><span class="p">])</span>
+                <span class="p">)</span> <span class="k">as</span> <span class="n">p</span><span class="p">:</span>
+        <span class="c">#    time.sleep(p.rank * 0.01)</span>
+            <span class="n">p</span><span class="o">.</span><span class="n">barrier</span><span class="p">()</span>
+
+            <span class="k">if</span> <span class="n">p</span><span class="o">.</span><span class="n">rank</span> <span class="o">==</span> <span class="n">p</span><span class="o">.</span><span class="n">num_threads</span> <span class="o">-</span> <span class="mi">1</span><span class="p">:</span>
+                <span class="n">os</span><span class="o">.</span><span class="n">kill</span><span class="p">(</span><span class="n">os</span><span class="o">.</span><span class="n">getpid</span><span class="p">(),</span> <span class="n">signal</span><span class="o">.</span><span class="n">SIGKILL</span><span class="p">)</span>
+            <span class="n">p</span><span class="o">.</span><span class="n">barrier</span><span class="p">()</span>
+        <span class="k">assert</span> <span class="bp">False</span>
+    <span class="k">except</span> <span class="n">ParallelException</span> <span class="k">as</span> <span class="n">e</span><span class="p">:</span>
+        <span class="k">return</span>
+    <span class="k">assert</span> <span class="bp">False</span>
+
+
+
+<span class="k">def</span> <span class="nf">main</span><span class="p">():</span>
+    <span class="n">testkill</span><span class="p">()</span>
+    <span class="c">#print &#39;kill done&#39;</span>
+    <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="mi">100</span><span class="p">):</span>
+        <span class="k">print</span><span class="p">(</span><span class="s">&#39;run&#39;</span><span class="p">,</span> <span class="n">i</span><span class="p">)</span>
+        <span class="n">testreduction</span><span class="p">()</span>
+        <span class="k">print</span><span class="p">(</span><span class="s">&#39;private&#39;</span><span class="p">)</span>
+        <span class="n">testprivate</span><span class="p">()</span>
+        <span class="k">print</span><span class="p">(</span><span class="s">&#39;shared&#39;</span><span class="p">)</span>
+        <span class="n">testshared</span><span class="p">()</span>
+        <span class="k">print</span><span class="p">(</span><span class="s">&#39;bairer&#39;</span><span class="p">)</span>
+        <span class="n">testbarrier</span><span class="p">()</span>
+        <span class="k">print</span><span class="p">(</span><span class="s">&#39;raisecritical&#39;</span><span class="p">)</span>
+        <span class="n">testraisecritical</span><span class="p">()</span>
+        <span class="k">print</span><span class="p">(</span><span class="s">&#39;raiseordered&#39;</span><span class="p">)</span>
+        <span class="n">testraiseordered</span><span class="p">()</span>
+        <span class="k">print</span><span class="p">(</span><span class="s">&#39;done&#39;</span><span class="p">,</span> <span class="n">i</span><span class="p">)</span>
+    <span class="k">print</span><span class="p">(</span><span class="s">&#39;all done&#39;</span><span class="p">)</span>
+
+<span class="k">if</span> <span class="n">__name__</span> <span class="o">==</span> <span class="s">&#39;__main__&#39;</span><span class="p">:</span>
+    <span class="n">main</span><span class="p">()</span>
+</pre></div>
+
+          </div>
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<div id="searchbox" style="display: none" role="search">
+  <h3>Quick search</h3>
+    <form class="search" action="../../search.html" method="get">
+      <input type="text" name="q" />
+      <input type="submit" value="Go" />
+      <input type="hidden" name="check_keywords" value="yes" />
+      <input type="hidden" name="area" value="default" />
+    </form>
+    <p class="searchtip" style="font-size: 90%">
+    Enter search terms or a module, class or function name.
+    </p>
+</div>
+<script type="text/javascript">$('#searchbox').show(0);</script>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;2015, Yu Feng.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 1.3.1</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.3</a>
+      
+    </div>
+
+    
+
+    
+  </body>
+</html>
