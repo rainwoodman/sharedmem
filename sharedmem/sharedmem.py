@@ -1,12 +1,96 @@
 """
-Dispatch your trivially parallizable jobs with sharedmem.
+    Easier parallel programming on shared memory computers.
 
-Environment variable OMP_NUM_THREADS is used to determine the
-default number of slaves.
+    Programming Model
+    -----------------
+    :py:class:`MapReduce` provides the equivalent to multiprocessing.Pool, with the following
+    differences:
 
-This file (sharedmem.py) can be embedded into other projects. 
+    - MapReduce does not require the work function to be picklable.
+    - MapReduce adds a reduction step that is guaranteed to run on the master process's
+      scope.
+    - MapReduce allows the use of critical sections and ordered execution in the work
+      function.
 
-The only external dependency is numpy.
+    Modifications to shared Memory arrays, allocated via 
+
+    - :py:meth:`sharedmem.empty`,
+    - :py:meth:`sharedmem.empty_like`,
+    - :py:meth:`sharedmem.copy`,
+
+    are visible by all processes, including the master process.
+
+    Usage
+    -----
+    This file (sharedmem.py) can be embedded into other projects. 
+
+    The only external dependency is numpy, since this was designed to
+    work with large shared memory chunks through numpy.ndarray.
+
+    Environment variable OMP_NUM_THREADS is used to determine the
+    default number of slaves.
+
+    Notes
+    -----
+    This module depends on the `fork` system call, thus is available
+    only on posix systems (not Windows).
+
+    Examples
+    --------
+
+    Sum up a large array
+
+    >>> input = numpy.arange(1024 * 1024 * 128, dtype='f8')
+    >>> output = sharedmem.empty(1024 * 1024 * 128, dtype='f8')
+    >>> with MapReduce() as pool:
+    >>>    chunksize = 1024 * 1024
+    >>>    def work(i):
+    >>>        s = slice (i, i + chunksize)
+    >>>        output[s] = input[s]
+    >>>        return i, sum(input[s])
+    >>>    def reduce(i, r):
+    >>>        print('chunk', i, 'done')
+    >>>        return r
+    >>>    r = pool.map(work, range(0, len(input), chunksize), reduce=reduce)
+    >>> print numpy.sum(r)
+    >>>
+
+    Textual analysis
+
+    >>> input = file('mytextfile.txt').readlines()
+    >>> word_count = {'bacon': 0, 'eggs': 0 }
+    >>> with MapReduce() as pool:
+    >>>    def work(line):
+    >>>        words = line.split()
+    >>>        for word in words:
+    >>>            word_count[word] += 1
+    >>>        return word_count
+    >>>    def reduce(wc):
+    >>>        for key in word_count:
+    >>>            word_count[key] += wc[key]
+    >>> print word_count
+    >>>
+
+    pool.ordered can be used to require a block of code to be executed in order
+    
+    >>> with MapReduce() as pool:
+    >>>    def work(i):
+    >>>         with pool.ordered:
+    >>>            print(i)
+    >>>    pool.map(work, range(10))
+
+    pool.critical can be used to require a block of code to be executed in a critical
+    section.
+
+    >>> counter = sharedmem.empty(1)
+    >>> counter[:] = 0
+    >>> with MapReduce() as pool:
+    >>>    def work(i):
+    >>>         with pool.critical:
+    >>>             counter[:] += i
+    >>>    pool.map(work, range(10))
+    >>> print(counter)
+
 
 """
 __author__ = "Yu Feng"
@@ -30,7 +114,6 @@ except ImportError:
 
 from collections import deque
 import traceback
-import time
 import gc
 import threading
 import heapq
@@ -46,50 +129,56 @@ import mmap
 __shmdebug__ = False
 
 def set_debug(flag):
-  """ in debug mode (flag==True), no slaves are spawn,
-      rather all work are done in serial on the master thread/process.
-      so that if the worker throws out exceptions, debugging from the main
-      process context is possible. (in iptyhon, with debug magic command, eg)
-  """
-  global __shmdebug__
-  __shmdebug__ = flag
+    """ Set the debug mode.
+
+        In debug mode (flag==True), no slaves are spawn.
+        All work are done in serial on the master thread/process.
+        This eases debuggin when the worker throws out an exception. 
+    """
+    global __shmdebug__
+    __shmdebug__ = flag
 
 def get_debug():
-  global __shmdebug__
-  return __shmdebug__
+    """ Get the debug mode """    
+    global __shmdebug__
+    return __shmdebug__
 
 def total_memory():
-  """ the amount of memory available for use.
-      default is the Free Memory entry in /proc/meminfo """
-  with file('/proc/meminfo', 'r') as f:
-      for line in f:
-          words = line.split()
-          if words[0].upper() == 'MEMTOTAL:':
-                return int(words[1]) * 1024
-  raise IOError('MemTotal unknown')
+    """ Returns the the amount of memory available for use.
+
+        This function is not very useful.
+        The memory is obtained from MemTotal entry in /proc/meminfo.
+
+    """
+    with file('/proc/meminfo', 'r') as f:
+        for line in f:
+            words = line.split()
+        if words[0].upper() == 'MEMTOTAL:':
+            return int(words[1]) * 1024
+    raise IOError('MemTotal unknown')
 
 def cpu_count():
-  """ The cpu count defaults to the number of physical cpu cores
-      but can be set with OMP_NUM_THREADS environment variable.
-      OMP_NUM_THREADS is used because if you hybrid sharedmem with
-      some openMP extenstions one environment will do it all.
+    """ Returns the number of slave processes to be spawned.
 
-      On PBS/torque systems if OMP_NUM_THREADS is empty, we try to
-      use the value of PBS_NUM_PPN variable.
+        The default value is the number of physical cpu cores seen by python.
+        :code:`OMP_NUM_THREADS` environment variable overrides it.
 
-      on some machines the physical number of cores does not equal
-      the number of cpus shall be used. PSC Blacklight for example.
+        On PBS/torque systems if OMP_NUM_THREADS is empty, we try to
+        use the value of :code:`PBS_NUM_PPN` variable.
 
-      Pool defaults to use cpu_count() slaves. however it can be overridden
-      in Pool.
-  """
-  num = os.getenv("OMP_NUM_THREADS")
-  if num is None:
-      num = os.getenv("PBS_NUM_PPN")
-  try:
-    return int(num)
-  except:
-    return multiprocessing.cpu_count()
+        Notes
+        -----
+        On some machines the physical number of cores does not equal
+        the number of cpus shall be used. PSC Blacklight for example.
+
+    """
+    num = os.getenv("OMP_NUM_THREADS")
+    if num is None:
+        num = os.getenv("PBS_NUM_PPN")
+    try:
+        return int(num)
+    except:
+        return multiprocessing.cpu_count()
 
 class SlaveException(Exception):
     def __init__(self, e, tracebackstr):
@@ -101,6 +190,7 @@ class StopProcessGroup(Exception):
         Exception.__init__(self, "StopProcessGroup")
 
 class ProcessGroup(object):
+    """ Monitoring a group of worker processes """
     def __init__(self, backend, main, np, args=()):
         self.Errors = backend.QueueFactory(1)
         self._tls = backend.StorageFactory()
@@ -328,12 +418,14 @@ class ProcessBackend:
 class background(object):
     """ to run a function in async with a process.
 
-        def function(*args, **kwargs):
-            pass
+        Examples
+        --------
 
-        bg = background(function, *args, **kwargs)
+        >>> def function(*args, **kwargs):
+        >>>    pass
+        >>> bg = background(function, *args, **kwargs)
+        >>> rt = bg.wait()
 
-        rt = bg.wait()
     """
     def __init__(self, function, *args, **kwargs):
             
@@ -365,6 +457,22 @@ def MapReduceByThread(np=None):
     return MapReduce(backend=ThreadBackend, np=np)
 
 class MapReduce(object):
+    """
+        A pool of slave processes for a Map-Reduce operation
+
+        Parameters
+        ----------
+        backend : ProcessBackend or ThreadBackend
+
+        np   : int or None
+            Number of processes to use. Default (None) is from OMP_NUM_THREADS or
+            the number of available cores on the computer.
+
+        Notes
+        -----
+        Always wrap the call to :py:meth:`map` in a context manager ('with') block.
+
+    """
     def __init__(self, backend=ProcessBackend, np=None):
         """ if np is 0, run in serial """
         self.backend = backend
@@ -373,7 +481,7 @@ class MapReduce(object):
         else:
             self.np = np
 
-    def main(self, pg, Q, R, sequence, realfunc):
+    def _main(self, pg, Q, R, sequence, realfunc):
         # get and put will raise SlaveException
         # and terminate the process.
         # the exception is muted in ProcessGroup,
@@ -391,7 +499,6 @@ class MapReduce(object):
             r = realfunc(work)
             pg.put(R, (i, r))
 
-
     def __enter__(self):
         self.critical = self.backend.LockFactory()
         self.ordered = Ordered(self.backend)
@@ -402,6 +509,38 @@ class MapReduce(object):
         pass
 
     def map(self, func, sequence, reduce=None, star=False):
+        """ Parallel map reduce.
+
+            Apply func to each item on the sequence, in parallel. 
+            As the results are collected, reduce is called on the result.
+            The reduced result is returned as a list.
+            
+            Parameters
+            ----------
+            func : callable
+                The function to call. It must accept the same number of
+                arguments as the length of an item in the sequence
+
+            sequence : list or array_like
+                The sequence of arguments to be applied to func.
+
+            reduce : callable, optional
+                Apply an reduction operation on the 
+                return values of func. If func returns a tuple, they
+                are treated as positional arguments of reduce.
+
+            star : boolean
+                if True, the items in sequence are treated as positional
+                arguments of reduce.
+
+            Returns
+            -------
+            results : list
+                The list of reduced results from the map operation, in
+                the order of the arguments of sequence.
+                
+                
+        """ 
         def realreduce(r):
             if reduce:
                 if isinstance(r, tuple):
@@ -422,7 +561,7 @@ class MapReduce(object):
         R = self.backend.QueueFactory(64)
         self.ordered.reset()
 
-        pg = ProcessGroup(main=self.main, np=self.np,
+        pg = ProcessGroup(main=self._main, np=self.np,
                 backend=self.backend,
                 args=(Q, R, sequence, realfunc))
 
@@ -486,43 +625,59 @@ class MapReduce(object):
 
 
 def empty_like(array, dtype=None):
-  if dtype is None: dtype = array.dtype
-  return anonymousmemmap(numpy.broadcast(array, array).shape, dtype)
+    """ Create a shared memory array from the shape of array.
+    """
+    if dtype is None: dtype = array.dtype
+    return anonymousmemmap(numpy.broadcast(array, array).shape, dtype)
 
 def empty(shape, dtype='f8'):
-  """ allocates an empty array on the shared memory """
-  return anonymousmemmap(shape, dtype)
+    """ Create an empty shared memory array.
+    """
+    return anonymousmemmap(shape, dtype)
 
 def copy(a):
-  """ copies an array to the shared memory, use
-     a = copy(a) to immediately dereference the old 'a' on private memory
-   """
-  shared = anonymousmemmap(a.shape, dtype=a.dtype)
-  shared[:] = a[:]
-  return shared
+    """ Copy an array to the shared memory. 
+
+        Notes
+        -----
+        copy is not always necessary because the private memory is always copy-on-write.
+
+        Use :code:`a = copy(a)` to immediately dereference the old 'a' on private memory
+    """
+    shared = anonymousmemmap(a.shape, dtype=a.dtype)
+    shared[:] = a[:]
+    return shared
 
 def fromiter(iter, dtype, count=None):
     return copy(numpy.fromiter(iter, dtype, count))
 
 def __unpickle__(ai, dtype):
-  dtype = numpy.dtype(dtype)
-  tp = numpy.ctypeslib._typecodes['|u1']
-  # if there are strides, use strides, otherwise the stride is the itemsize of dtype
-  if ai['strides']:
-    tp *= ai['strides'][-1]
-  else:
-    tp *= dtype.itemsize
-  for i in numpy.asarray(ai['shape'])[::-1]:
-    tp *= i
-  # grab a flat char array at the sharemem address, with length at least contain ai required
-  ra = tp.from_address(ai['data'][0])
-  buffer = numpy.ctypeslib.as_array(ra).ravel()
-  # view it as what it should look like
-  shm = numpy.ndarray(buffer=buffer, dtype=dtype, 
-      strides=ai['strides'], shape=ai['shape']).view(type=anonymousmemmap)
-  return shm
+    dtype = numpy.dtype(dtype)
+    tp = numpy.ctypeslib._typecodes['|u1']
+
+    # if there are strides, use strides, otherwise the stride is the itemsize of dtype
+    if ai['strides']:
+        tp *= ai['strides'][-1]
+    else:
+        tp *= dtype.itemsize
+
+    for i in numpy.asarray(ai['shape'])[::-1]:
+        tp *= i
+
+    # grab a flat char array at the sharemem address, with length at least contain ai required
+    ra = tp.from_address(ai['data'][0])
+    buffer = numpy.ctypeslib.as_array(ra).ravel()
+    # view it as what it should look like
+    shm = numpy.ndarray(buffer=buffer, dtype=dtype, 
+            strides=ai['strides'], shape=ai['shape']).view(type=anonymousmemmap)
+    return shm
 
 class anonymousmemmap(numpy.memmap):
+    """ Arrays allocated on shared memory. 
+
+        The array is stored in an anonymous memory map that is shared between child-processes.
+
+    """
     def __new__(subtype, shape, dtype=numpy.uint8, order='C'):
 
         descr = numpy.dtype(dtype)
