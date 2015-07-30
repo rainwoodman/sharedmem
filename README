@@ -1,10 +1,9 @@
 Dispatch your trivially parallizable jobs with sharedmem.
 
-There are also sharedmem.argsort() and sharedmem.fromfile(),
-which are the parallel equivalent of numpy.argsort() and numpy.fromfile().
-
 Environment variable OMP_NUM_THREADS is used to determine the
 default number of Slaves.
+
+Now also supports python 3.
 
 Two major components:
 
