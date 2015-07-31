@@ -157,7 +157,9 @@ def test_critical():
         assert t[:] == 10000
 
         def work(i):
-            p[:] += 1
+            p[:] += 10
+            p[:] -= 9
+
         pool.map(work, range(10000))
 
         # wihtout a critical section is is messy

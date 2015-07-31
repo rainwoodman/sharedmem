@@ -5,10 +5,10 @@ python:
     - 2.7
     - 3.4
     - 3.3
-    - 3.2
 
 env:
     - NUMPY_VERSION=1.8
+    - OMP_NUM_THREADS=2
 
 before_install:
     - wget http://repo.continuum.io/miniconda/Miniconda-latest-Linux-x86_64.sh -O miniconda.sh
