@@ -4,6 +4,8 @@ python:
     - 2.6
     - 2.7
     - 3.4
+    - 3.3
+    - 3.2
 
 env:
     - NUMPY_VERSION=1.8
@@ -21,4 +23,4 @@ install:
     - conda install --yes numpy=$NUMPY_VERSION
     - python setup.py install
 
-script: ./runtests.py
+script: python ./runtests.py
