@@ -172,10 +172,16 @@
 
 <span class="kn">from</span> <span class="nn">collections</span> <span class="kn">import</span> <span class="n">deque</span>
 <span class="kn">import</span> <span class="nn">traceback</span>
+<span class="kn">import</span> <span class="nn">warnings</span>
 <span class="kn">import</span> <span class="nn">gc</span>
 <span class="kn">import</span> <span class="nn">threading</span>
 <span class="kn">import</span> <span class="nn">heapq</span>
 <span class="kn">import</span> <span class="nn">os</span>
+
+<span class="k">try</span><span class="p">:</span>
+    <span class="kn">import</span> <span class="nn">cPickle</span> <span class="kn">as</span> <span class="nn">pickle</span>
+<span class="k">except</span> <span class="ne">ImportError</span><span class="p">:</span>
+    <span class="kn">import</span> <span class="nn">pickle</span>
 
 <span class="kn">import</span> <span class="nn">numpy</span>
 <span class="kn">from</span> <span class="nn">multiprocessing</span> <span class="kn">import</span> <span class="n">RawArray</span>
@@ -236,11 +242,33 @@
     <span class="k">try</span><span class="p">:</span>
         <span class="k">return</span> <span class="nb">int</span><span class="p">(</span><span class="n">num</span><span class="p">)</span>
     <span class="k">except</span><span class="p">:</span>
-        <span class="k">return</span> <span class="n">multiprocessing</span><span class="o">.</span><span class="n">cpu_count</span><span class="p">()</span>
-</div>
+        <span class="k">return</span> <span class="n">multiprocessing</span><span class="o">.</span><span class="n">cpu_count</span><span class="p">()</span></div>
+<span class="k">class</span> <span class="nc">LostExceptionType</span><span class="p">(</span><span class="ne">Warning</span><span class="p">):</span>
+    <span class="k">pass</span>
+
 <div class="viewcode-block" id="SlaveException"><a class="viewcode-back" href="../index.html#sharedmem.SlaveException">[docs]</a><span class="k">class</span> <span class="nc">SlaveException</span><span class="p">(</span><span class="ne">Exception</span><span class="p">):</span>
-    <span class="k">def</span> <span class="nf">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">e</span><span class="p">,</span> <span class="n">tracebackstr</span><span class="p">):</span>
-        <span class="ne">Exception</span><span class="o">.</span><span class="n">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="s">&quot;</span><span class="si">%s</span><span class="se">\n</span><span class="si">%s</span><span class="s">&quot;</span> <span class="o">%</span> <span class="p">(</span><span class="nb">str</span><span class="p">(</span><span class="n">e</span><span class="p">),</span> <span class="n">tracebackstr</span><span class="p">))</span>
+    <span class="sd">&quot;&quot;&quot; Represents an exception that has occured during a slave process </span>
+
+<span class="sd">        Attributes</span>
+<span class="sd">        ----------</span>
+<span class="sd">        reason : Exception, or subclass of Exception.</span>
+<span class="sd">            The underlining reason of the exception.</span>
+<span class="sd">            If the original exception can be pickled, the type of the exception</span>
+<span class="sd">            is preserved. Otherwise, a LostExceptionType warning is issued, and</span>
+<span class="sd">            reason is of type Exception.</span>
+
+<span class="sd">        traceback : str</span>
+<span class="sd">            The string version of the traceback that can be used to inspect the </span>
+<span class="sd">            error.</span>
+
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="k">def</span> <span class="nf">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">reason</span><span class="p">,</span> <span class="n">traceback</span><span class="p">):</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">reason</span><span class="p">,</span> <span class="ne">Exception</span><span class="p">):</span>
+            <span class="n">warnings</span><span class="o">.</span><span class="n">warn</span><span class="p">(</span><span class="s">&quot;Type information of Unpicklable exception </span><span class="si">%s</span><span class="s"> is lost&quot;</span> <span class="o">%</span> <span class="n">reason</span><span class="p">,</span> <span class="n">LostExceptionType</span><span class="p">)</span>
+            <span class="n">reason</span> <span class="o">=</span> <span class="ne">Exception</span><span class="p">(</span><span class="n">reason</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">reason</span> <span class="o">=</span> <span class="n">reason</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">traceback</span> <span class="o">=</span> <span class="n">traceback</span>
+        <span class="ne">Exception</span><span class="o">.</span><span class="n">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="s">&quot;</span><span class="si">%s</span><span class="se">\n</span><span class="si">%s</span><span class="s">&quot;</span> <span class="o">%</span> <span class="p">(</span><span class="nb">str</span><span class="p">(</span><span class="n">reason</span><span class="p">),</span> <span class="nb">str</span><span class="p">(</span><span class="n">traceback</span><span class="p">)))</span>
 </div>
 <div class="viewcode-block" id="StopProcessGroup"><a class="viewcode-back" href="../index.html#sharedmem.StopProcessGroup">[docs]</a><span class="k">class</span> <span class="nc">StopProcessGroup</span><span class="p">(</span><span class="ne">Exception</span><span class="p">):</span>
     <span class="sd">&quot;&quot;&quot; StopProcessGroup will terminate the slave process/thread &quot;&quot;&quot;</span>
@@ -291,7 +319,13 @@
                 <span class="c"># not picklable (thus can&#39;t be sent via a queue), </span>
                 <span class="c"># However, we don&#39;t use the extra information in customized</span>
                 <span class="c"># Exception types anyways.</span>
-                <span class="bp">self</span><span class="o">.</span><span class="n">Errors</span><span class="o">.</span><span class="n">put</span><span class="p">((</span><span class="nb">str</span><span class="p">(</span><span class="n">e</span><span class="p">),</span> <span class="n">traceback</span><span class="o">.</span><span class="n">format_exc</span><span class="p">()),</span> <span class="n">timeout</span><span class="o">=</span><span class="mi">0</span><span class="p">)</span>
+                <span class="k">try</span><span class="p">:</span>
+                    <span class="n">pickle</span><span class="o">.</span><span class="n">dumps</span><span class="p">(</span><span class="n">e</span><span class="p">)</span>
+                <span class="k">except</span> <span class="ne">Exception</span> <span class="k">as</span> <span class="n">ee</span><span class="p">:</span>
+                    <span class="n">e</span> <span class="o">=</span> <span class="nb">str</span><span class="p">(</span><span class="n">e</span><span class="p">)</span>
+                 
+                <span class="n">tb</span> <span class="o">=</span> <span class="n">traceback</span><span class="o">.</span><span class="n">format_exc</span><span class="p">()</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">Errors</span><span class="o">.</span><span class="n">put</span><span class="p">((</span><span class="n">e</span><span class="p">,</span> <span class="n">tb</span><span class="p">),</span> <span class="n">timeout</span><span class="o">=</span><span class="mi">0</span><span class="p">)</span>
             <span class="k">except</span> <span class="n">queue</span><span class="o">.</span><span class="n">Full</span><span class="p">:</span>
                 <span class="k">pass</span>
         <span class="k">finally</span><span class="p">:</span>
@@ -474,7 +508,14 @@
           <span class="k">return</span> <span class="k">lambda</span><span class="p">:</span><span class="bp">None</span>
 
 <div class="viewcode-block" id="background"><a class="viewcode-back" href="../index.html#sharedmem.background">[docs]</a><span class="k">class</span> <span class="nc">background</span><span class="p">(</span><span class="nb">object</span><span class="p">):</span>
-    <span class="sd">&quot;&quot;&quot; to run a function in async with a process.</span>
+    <span class="sd">&quot;&quot;&quot; Asyncrhonized function call via a background process.</span>
+
+<span class="sd">        Parameters</span>
+<span class="sd">        ----------</span>
+<span class="sd">        function : callable</span>
+<span class="sd">            the function to call</span>
+<span class="sd">        *args   : positional arguments</span>
+<span class="sd">        **kwargs : keyward arguments</span>
 
 <span class="sd">        Examples</span>
 <span class="sd">        --------</span>
@@ -490,19 +531,23 @@
         <span class="n">backend</span> <span class="o">=</span> <span class="n">kwargs</span><span class="o">.</span><span class="n">pop</span><span class="p">(</span><span class="s">&#39;backend&#39;</span><span class="p">,</span> <span class="n">ProcessBackend</span><span class="p">)</span>
 
         <span class="bp">self</span><span class="o">.</span><span class="n">result</span> <span class="o">=</span> <span class="n">backend</span><span class="o">.</span><span class="n">QueueFactory</span><span class="p">(</span><span class="mi">1</span><span class="p">)</span>
-        <span class="bp">self</span><span class="o">.</span><span class="n">slave</span> <span class="o">=</span> <span class="n">backend</span><span class="o">.</span><span class="n">SlaveFactory</span><span class="p">(</span><span class="n">target</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">closure</span><span class="p">,</span> 
+        <span class="bp">self</span><span class="o">.</span><span class="n">slave</span> <span class="o">=</span> <span class="n">backend</span><span class="o">.</span><span class="n">SlaveFactory</span><span class="p">(</span><span class="n">target</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">_closure</span><span class="p">,</span> 
                 <span class="n">args</span><span class="o">=</span><span class="p">(</span><span class="n">function</span><span class="p">,</span> <span class="n">args</span><span class="p">,</span> <span class="n">kwargs</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">result</span><span class="p">))</span>
         <span class="bp">self</span><span class="o">.</span><span class="n">slave</span><span class="o">.</span><span class="n">start</span><span class="p">()</span>
 
-<div class="viewcode-block" id="background.closure"><a class="viewcode-back" href="../index.html#sharedmem.background.closure">[docs]</a>    <span class="k">def</span> <span class="nf">closure</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">function</span><span class="p">,</span> <span class="n">args</span><span class="p">,</span> <span class="n">kwargs</span><span class="p">,</span> <span class="n">result</span><span class="p">):</span>
+    <span class="k">def</span> <span class="nf">_closure</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">function</span><span class="p">,</span> <span class="n">args</span><span class="p">,</span> <span class="n">kwargs</span><span class="p">,</span> <span class="n">result</span><span class="p">):</span>
         <span class="k">try</span><span class="p">:</span>
             <span class="n">rt</span> <span class="o">=</span> <span class="n">function</span><span class="p">(</span><span class="o">*</span><span class="n">args</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">)</span>
         <span class="k">except</span> <span class="ne">Exception</span> <span class="k">as</span> <span class="n">e</span><span class="p">:</span>
             <span class="n">result</span><span class="o">.</span><span class="n">put</span><span class="p">((</span><span class="n">e</span><span class="p">,</span> <span class="n">traceback</span><span class="o">.</span><span class="n">format_exc</span><span class="p">()))</span>
         <span class="k">else</span><span class="p">:</span>
             <span class="n">result</span><span class="o">.</span><span class="n">put</span><span class="p">((</span><span class="bp">None</span><span class="p">,</span> <span class="n">rt</span><span class="p">))</span>
-</div>
+
 <div class="viewcode-block" id="background.wait"><a class="viewcode-back" href="../index.html#sharedmem.background.wait">[docs]</a>    <span class="k">def</span> <span class="nf">wait</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot; Wait and join the child process. </span>
+<span class="sd">            The return value of the function call is returned.</span>
+<span class="sd">            If any exception occurred it is wrapped and raised.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
         <span class="n">e</span><span class="p">,</span> <span class="n">r</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">result</span><span class="o">.</span><span class="n">get</span><span class="p">()</span>
         <span class="bp">self</span><span class="o">.</span><span class="n">slave</span><span class="o">.</span><span class="n">join</span><span class="p">()</span>
         <span class="bp">self</span><span class="o">.</span><span class="n">slave</span> <span class="o">=</span> <span class="bp">None</span>
@@ -512,6 +557,10 @@
         <span class="k">return</span> <span class="n">r</span>
 </div></div>
 <div class="viewcode-block" id="MapReduceByThread"><a class="viewcode-back" href="../index.html#sharedmem.MapReduceByThread">[docs]</a><span class="k">def</span> <span class="nf">MapReduceByThread</span><span class="p">(</span><span class="n">np</span><span class="o">=</span><span class="bp">None</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot; Creates a MapReduce object but with the Thread backend.</span>
+
+<span class="sd">        The process backend is usually preferred.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
     <span class="k">return</span> <span class="n">MapReduce</span><span class="p">(</span><span class="n">backend</span><span class="o">=</span><span class="n">ThreadBackend</span><span class="p">,</span> <span class="n">np</span><span class="o">=</span><span class="n">np</span><span class="p">)</span>
 </div>
 <div class="viewcode-block" id="MapReduce"><a class="viewcode-back" href="../index.html#sharedmem.MapReduce">[docs]</a><span class="k">class</span> <span class="nc">MapReduce</span><span class="p">(</span><span class="nb">object</span><span class="p">):</span>
@@ -521,10 +570,13 @@
 <span class="sd">        Parameters</span>
 <span class="sd">        ----------</span>
 <span class="sd">        backend : ProcessBackend or ThreadBackend</span>
+<span class="sd">            ProcessBackend is preferred. ThreadBackend can be used in cases where</span>
+<span class="sd">            processes creation is not allowed.</span>
 
 <span class="sd">        np   : int or None</span>
 <span class="sd">            Number of processes to use. Default (None) is from OMP_NUM_THREADS or</span>
-<span class="sd">            the number of available cores on the computer.</span>
+<span class="sd">            the number of available cores on the computer. If np is 0, all operations</span>
+<span class="sd">            are performed on the master process -- no child processes are created.</span>
 
 <span class="sd">        Notes</span>
 <span class="sd">        -----</span>
@@ -532,7 +584,6 @@
 
 <span class="sd">    &quot;&quot;&quot;</span>
     <span class="k">def</span> <span class="nf">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">backend</span><span class="o">=</span><span class="n">ProcessBackend</span><span class="p">,</span> <span class="n">np</span><span class="o">=</span><span class="bp">None</span><span class="p">):</span>
-        <span class="sd">&quot;&quot;&quot; if np is 0, run in serial &quot;&quot;&quot;</span>
         <span class="bp">self</span><span class="o">.</span><span class="n">backend</span> <span class="o">=</span> <span class="n">backend</span>
         <span class="k">if</span> <span class="n">np</span> <span class="ow">is</span> <span class="bp">None</span><span class="p">:</span>
             <span class="bp">self</span><span class="o">.</span><span class="n">np</span> <span class="o">=</span> <span class="n">cpu_count</span><span class="p">()</span>
@@ -567,7 +618,7 @@
         <span class="k">pass</span>
 
 <div class="viewcode-block" id="MapReduce.map"><a class="viewcode-back" href="../index.html#sharedmem.MapReduce.map">[docs]</a>    <span class="k">def</span> <span class="nf">map</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">func</span><span class="p">,</span> <span class="n">sequence</span><span class="p">,</span> <span class="nb">reduce</span><span class="o">=</span><span class="bp">None</span><span class="p">,</span> <span class="n">star</span><span class="o">=</span><span class="bp">False</span><span class="p">):</span>
-        <span class="sd">&quot;&quot;&quot; Parallel map reduce.</span>
+        <span class="sd">&quot;&quot;&quot; Map-reduce with multile processes.</span>
 
 <span class="sd">            Apply func to each item on the sequence, in parallel. </span>
 <span class="sd">            As the results are collected, reduce is called on the result.</span>
@@ -577,7 +628,13 @@
 <span class="sd">            ----------</span>
 <span class="sd">            func : callable</span>
 <span class="sd">                The function to call. It must accept the same number of</span>
-<span class="sd">                arguments as the length of an item in the sequence</span>
+<span class="sd">                arguments as the length of an item in the sequence.</span>
+
+<span class="sd">                .. warning::</span>
+
+<span class="sd">                    func is not supposed to use exceptions for flow control.</span>
+<span class="sd">                    In non-debug mode all exceptions will be wrapped into</span>
+<span class="sd">                    a :py:class:`SlaveException`.</span>
 
 <span class="sd">            sequence : list or array_like</span>
 <span class="sd">                The sequence of arguments to be applied to func.</span>
@@ -597,7 +654,12 @@
 <span class="sd">                The list of reduced results from the map operation, in</span>
 <span class="sd">                the order of the arguments of sequence.</span>
 <span class="sd">                </span>
-<span class="sd">                </span>
+<span class="sd">            Raises</span>
+<span class="sd">            ------</span>
+<span class="sd">            SlaveException</span>
+<span class="sd">                If any of the slave process encounters</span>
+<span class="sd">                an exception. Inspect :py:attr:`SlaveException.reason` for the underlying exception.</span>
+<span class="sd">        </span>
 <span class="sd">        &quot;&quot;&quot;</span> 
         <span class="k">def</span> <span class="nf">realreduce</span><span class="p">(</span><span class="n">r</span><span class="p">):</span>
             <span class="k">if</span> <span class="nb">reduce</span><span class="p">:</span>

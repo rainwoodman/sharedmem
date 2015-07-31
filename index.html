@@ -188,8 +188,24 @@ the number of cpus shall be used. PSC Blacklight for example.</p>
 
 <dl class="exception">
 <dt id="sharedmem.SlaveException">
-<em class="property">exception </em><code class="descclassname">sharedmem.</code><code class="descname">SlaveException</code><span class="sig-paren">(</span><em>e</em>, <em>tracebackstr</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/sharedmem.html#SlaveException"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#sharedmem.SlaveException" title="Permalink to this definition">¶</a></dt>
+<em class="property">exception </em><code class="descclassname">sharedmem.</code><code class="descname">SlaveException</code><span class="sig-paren">(</span><em>reason</em>, <em>traceback</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/sharedmem.html#SlaveException"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#sharedmem.SlaveException" title="Permalink to this definition">¶</a></dt>
 <dd><p>Bases: <code class="xref py py-class docutils literal"><span class="pre">exceptions.Exception</span></code></p>
+<p>Represents an exception that has occured during a slave process</p>
+<p class="rubric">Attributes</p>
+<table border="1" class="docutils">
+<colgroup>
+<col width="4%" />
+<col width="96%" />
+</colgroup>
+<tbody valign="top">
+<tr class="row-odd"><td>reason</td>
+<td>(Exception, or subclass of Exception.) The underlining reason of the exception. If the original exception can be pickled, the type of the exception is preserved. Otherwise, a LostExceptionType warning is issued, and reason is of type Exception.</td>
+</tr>
+<tr class="row-even"><td>traceback</td>
+<td>(str) The string version of the traceback that can be used to inspect the error.</td>
+</tr>
+</tbody>
+</table>
 </dd></dl>
 
 <dl class="exception">
@@ -203,7 +219,21 @@ the number of cpus shall be used. PSC Blacklight for example.</p>
 <dt id="sharedmem.background">
 <em class="property">class </em><code class="descclassname">sharedmem.</code><code class="descname">background</code><span class="sig-paren">(</span><em>function</em>, <em>*args</em>, <em>**kwargs</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/sharedmem.html#background"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#sharedmem.background" title="Permalink to this definition">¶</a></dt>
 <dd><p>Bases: <code class="xref py py-class docutils literal"><span class="pre">object</span></code></p>
-<p>to run a function in async with a process.</p>
+<p>Asyncrhonized function call via a background process.</p>
+<table class="docutils field-list" frame="void" rules="none">
+<col class="field-name" />
+<col class="field-body" />
+<tbody valign="top">
+<tr class="field-odd field"><th class="field-name">Parameters:</th><td class="field-body"><p class="first"><strong>function</strong> : callable</p>
+<blockquote>
+<div><p>the function to call</p>
+</div></blockquote>
+<p><strong>*args</strong> : positional arguments</p>
+<p class="last"><strong>**kwargs</strong> : keyward arguments</p>
+</td>
+</tr>
+</tbody>
+</table>
 <p class="rubric">Examples</p>
 <div class="highlight-python"><div class="highlight"><pre><span class="gp">&gt;&gt;&gt; </span><span class="k">def</span> <span class="nf">function</span><span class="p">(</span><span class="o">*</span><span class="n">args</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">):</span>
 <span class="gp">&gt;&gt;&gt; </span>   <span class="k">pass</span>
@@ -218,23 +248,18 @@ the number of cpus shall be used. PSC Blacklight for example.</p>
 <col width="90%" />
 </colgroup>
 <tbody valign="top">
-<tr class="row-odd"><td><a class="reference internal" href="#sharedmem.background.closure" title="sharedmem.background.closure"><code class="xref py py-obj docutils literal"><span class="pre">closure</span></code></a>(function,&nbsp;args,&nbsp;kwargs,&nbsp;result)</td>
-<td></td>
-</tr>
-<tr class="row-even"><td><a class="reference internal" href="#sharedmem.background.wait" title="sharedmem.background.wait"><code class="xref py py-obj docutils literal"><span class="pre">wait</span></code></a>()</td>
-<td></td>
+<tr class="row-odd"><td><a class="reference internal" href="#sharedmem.background.wait" title="sharedmem.background.wait"><code class="xref py py-obj docutils literal"><span class="pre">wait</span></code></a>()</td>
+<td>Wait and join the child process.</td>
 </tr>
 </tbody>
 </table>
 <dl class="method">
-<dt id="sharedmem.background.closure">
-<code class="descname">closure</code><span class="sig-paren">(</span><em>function</em>, <em>args</em>, <em>kwargs</em>, <em>result</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/sharedmem.html#background.closure"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#sharedmem.background.closure" title="Permalink to this definition">¶</a></dt>
-<dd></dd></dl>
-
-<dl class="method">
 <dt id="sharedmem.background.wait">
 <code class="descname">wait</code><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="_modules/sharedmem.html#background.wait"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#sharedmem.background.wait" title="Permalink to this definition">¶</a></dt>
-<dd></dd></dl>
+<dd><p>Wait and join the child process. 
+The return value of the function call is returned.
+If any exception occurred it is wrapped and raised.</p>
+</dd></dl>
 
 </dd></dl>
 
@@ -248,10 +273,15 @@ the number of cpus shall be used. PSC Blacklight for example.</p>
 <col class="field-body" />
 <tbody valign="top">
 <tr class="field-odd field"><th class="field-name">Parameters:</th><td class="field-body"><p class="first"><strong>backend</strong> : ProcessBackend or ThreadBackend</p>
+<blockquote>
+<div><p>ProcessBackend is preferred. ThreadBackend can be used in cases where
+processes creation is not allowed.</p>
+</div></blockquote>
 <p><strong>np</strong> : int or None</p>
 <blockquote class="last">
 <div><p>Number of processes to use. Default (None) is from OMP_NUM_THREADS or
-the number of available cores on the computer.</p>
+the number of available cores on the computer. If np is 0, all operations
+are performed on the master process &#8211; no child processes are created.</p>
 </div></blockquote>
 </td>
 </tr>
@@ -267,14 +297,14 @@ the number of available cores on the computer.</p>
 </colgroup>
 <tbody valign="top">
 <tr class="row-odd"><td><a class="reference internal" href="#sharedmem.MapReduce.map" title="sharedmem.MapReduce.map"><code class="xref py py-obj docutils literal"><span class="pre">map</span></code></a>(func,&nbsp;sequence[,&nbsp;reduce,&nbsp;star])</td>
-<td>Parallel map reduce.</td>
+<td>Map-reduce with multile processes.</td>
 </tr>
 </tbody>
 </table>
 <dl class="method">
 <dt id="sharedmem.MapReduce.map">
 <code class="descname">map</code><span class="sig-paren">(</span><em>func</em>, <em>sequence</em>, <em>reduce=None</em>, <em>star=False</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/sharedmem.html#MapReduce.map"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#sharedmem.MapReduce.map" title="Permalink to this definition">¶</a></dt>
-<dd><p>Parallel map reduce.</p>
+<dd><p>Map-reduce with multile processes.</p>
 <p>Apply func to each item on the sequence, in parallel. 
 As the results are collected, reduce is called on the result.
 The reduced result is returned as a list.</p>
@@ -285,7 +315,13 @@ The reduced result is returned as a list.</p>
 <tr class="field-odd field"><th class="field-name">Parameters:</th><td class="field-body"><p class="first"><strong>func</strong> : callable</p>
 <blockquote>
 <div><p>The function to call. It must accept the same number of
-arguments as the length of an item in the sequence</p>
+arguments as the length of an item in the sequence.</p>
+<div class="admonition warning">
+<p class="first admonition-title">Warning</p>
+<p class="last">func is not supposed to use exceptions for flow control.
+In non-debug mode all exceptions will be wrapped into
+a <a class="reference internal" href="#sharedmem.SlaveException" title="sharedmem.SlaveException"><code class="xref py py-class docutils literal"><span class="pre">SlaveException</span></code></a>.</p>
+</div>
 </div></blockquote>
 <p><strong>sequence</strong> : list or array_like</p>
 <blockquote>
@@ -305,9 +341,16 @@ arguments of reduce.</p>
 </td>
 </tr>
 <tr class="field-even field"><th class="field-name">Returns:</th><td class="field-body"><p class="first"><strong>results</strong> : list</p>
-<blockquote class="last">
+<blockquote>
 <div><p>The list of reduced results from the map operation, in
 the order of the arguments of sequence.</p>
+</div></blockquote>
+</td>
+</tr>
+<tr class="field-odd field"><th class="field-name">Raises:</th><td class="field-body"><p class="first"><strong>SlaveException</strong></p>
+<blockquote class="last">
+<div><p>If any of the slave process encounters
+an exception. Inspect <code class="xref py py-attr docutils literal"><span class="pre">SlaveException.reason</span></code> for the underlying exception.</p>
 </div></blockquote>
 </td>
 </tr>
@@ -320,7 +363,9 @@ the order of the arguments of sequence.</p>
 <dl class="function">
 <dt id="sharedmem.MapReduceByThread">
 <code class="descclassname">sharedmem.</code><code class="descname">MapReduceByThread</code><span class="sig-paren">(</span><em>np=None</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/sharedmem.html#MapReduceByThread"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#sharedmem.MapReduceByThread" title="Permalink to this definition">¶</a></dt>
-<dd></dd></dl>
+<dd><p>Creates a MapReduce object but with the Thread backend.</p>
+<p>The process backend is usually preferred.</p>
+</dd></dl>
 
 <dl class="function">
 <dt id="sharedmem.empty">
