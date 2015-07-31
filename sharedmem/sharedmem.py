@@ -198,6 +198,21 @@ class LostExceptionType(Warning):
     pass
 
 class SlaveException(Exception):
+    """ Represents an exception that has occured during a slave process 
+
+        Attributes
+        ----------
+        reason : Exception, or subclass of Exception.
+            The underlining reason of the exception.
+            If the original exception can be pickled, the type of the exception
+            is preserved. Otherwise, a LostExceptionType warning is issued, and
+            reason is of type Exception.
+
+        traceback : str
+            The string version of the traceback that can be used to inspect the 
+            error.
+
+    """
     def __init__(self, reason, traceback):
         if not isinstance(reason, Exception):
             warnings.warn("Type information of Unpicklable exception %s is lost" % reason, LostExceptionType)
@@ -564,7 +579,13 @@ class MapReduce(object):
             ----------
             func : callable
                 The function to call. It must accept the same number of
-                arguments as the length of an item in the sequence
+                arguments as the length of an item in the sequence.
+
+                .. warning::
+
+                    func is not supposed to use exceptions for flow control.
+                    In non-debug mode all exceptions will be wrapped into
+                    a :py:class:`SlaveException`.
 
             sequence : list or array_like
                 The sequence of arguments to be applied to func.
@@ -584,7 +605,12 @@ class MapReduce(object):
                 The list of reduced results from the map operation, in
                 the order of the arguments of sequence.
                 
-                
+            Raises
+            ------
+            SlaveException
+                If any of the slave process encounters
+                an exception. Inspect :py:attr:`SlaveException.reason` for the underlying exception.
+        
         """ 
         def realreduce(r):
             if reduce:
