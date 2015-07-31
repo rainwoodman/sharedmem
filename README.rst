@@ -2,6 +2,9 @@ Dispatch your trivially parallizable jobs with sharedmem.
 
 Now also supports Python 3.
 
+[![Build Status](https://api.travis-ci.org/rainwoodman/sharedmem.svg)]
+(https://api.travis-ci.org/rainwoodman/sharedmem.svg)
+
 - sharedmem.empty creates numpy arrays to child processes.
 
 - sharedmem.MapReduce dispatches work to child processes.
