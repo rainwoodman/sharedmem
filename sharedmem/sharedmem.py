@@ -123,10 +123,16 @@ except ImportError:
 
 from collections import deque
 import traceback
+import warnings
 import gc
 import threading
 import heapq
 import os
+
+try:
+    import cPickle as pickle
+except ImportError:
+    import pickle
 
 import numpy
 from multiprocessing import RawArray
@@ -188,10 +194,17 @@ def cpu_count():
         return int(num)
     except:
         return multiprocessing.cpu_count()
+class LostExceptionType(Warning):
+    pass
 
 class SlaveException(Exception):
-    def __init__(self, e, tracebackstr):
-        Exception.__init__(self, "%s\n%s" % (str(e), tracebackstr))
+    def __init__(self, reason, traceback):
+        if not isinstance(reason, Exception):
+            warnings.warn("Type information of Unpicklable exception %s is lost" % reason, LostExceptionType)
+            reason = Exception(reason)
+        self.reason = reason
+        self.traceback = traceback
+        Exception.__init__(self, "%s\n%s" % (str(reason), str(traceback)))
 
 class StopProcessGroup(Exception):
     """ StopProcessGroup will terminate the slave process/thread """
@@ -242,7 +255,13 @@ class ProcessGroup(object):
                 # not picklable (thus can't be sent via a queue), 
                 # However, we don't use the extra information in customized
                 # Exception types anyways.
-                self.Errors.put((str(e), traceback.format_exc()), timeout=0)
+                try:
+                    pickle.dumps(e)
+                except Exception as ee:
+                    e = str(e)
+                 
+                tb = traceback.format_exc()
+                self.Errors.put((e, tb), timeout=0)
             except queue.Full:
                 pass
         finally:

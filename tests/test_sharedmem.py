@@ -64,19 +64,40 @@ def test_killed():
 
     raise AssertionError("Shall not reach here")
 
-def test_raise():
-    class MyException(Exception):
-        def __reduce__(self):
-            raise Exception("Cannot pickle this thing")
+class UnpicklableException(Exception):
+    def __reduce__(self):
+        raise Exception("This pickle is not supposed to be pickled")
 
+import warnings
+def test_unpicklable_raise():
     with sharedmem.MapReduce() as pool:
         def work(i):
             time.sleep(0.1 * numpy.random.uniform())
             if i == 10:
-                raise MyException("Raise an exception")
+                raise UnpicklableException("Raise an exception")
+        try:
+            with warnings.catch_warnings(record=True) as w:
+                pool.map(work, range(100))
+            # except an warning here
+            assert len(w) == 1 
+        except Exception as e:
+            assert not isinstance(e.reason, UnpicklableException) 
+            return
+    raise AssertionError("Shall not reach here")
+
+class PicklableException(Exception):
+    pass
+
+def test_picklable_raise():
+    with sharedmem.MapReduce() as pool:
+        def work(i):
+            time.sleep(0.1 * numpy.random.uniform())
+            if i == 10:
+                raise PicklableException("Raise an exception")
         try:
             pool.map(work, range(100))
-        except Exception as e:
+        except sharedmem.SlaveException as e:
+            assert isinstance(e.reason, PicklableException)
             return
     raise AssertionError("Shall not reach here")
 
