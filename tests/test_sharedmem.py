@@ -9,8 +9,8 @@ def run_idle(pool):
     def work(i):
         time.sleep(0.4)
 
-    now = time.time()
     with pool:
+        now = time.time()
         pool.map(work, range(pool.np))
 
     return time.time() - now
@@ -146,24 +146,32 @@ def test_ordered():
 def test_critical():
     t = sharedmem.empty(1, dtype='i8')
     t[:] = 0
-    p = sharedmem.empty(1, dtype='i8')
-    p[:] = 0
-    with sharedmem.MapReduce(np=32) as pool:
+    # FIXME: if the system has one core then this will never fail,
+    # even if the critical section is not 
+    with sharedmem.MapReduce(np=8) as pool:
         def work(i):
             with pool.critical:
-                t[:] += 1
-        pool.map(work, range(10000))
+                t[:] = 1
+                if i != 30:
+                    time.sleep(0.01)
+                assert t[:] == 1
+                t[:] = 0
 
-        assert t[:] == 10000
+        pool.map(work, range(16))
 
         def work(i):
-            p[:] += 10
-            p[:] -= 9
+            t[:] = 1
+            if i != 30:
+                time.sleep(0.01)
+            assert t[:] == 1
+            t[:] = 0
 
-        pool.map(work, range(10000))
-
-        # wihtout a critical section is is messy
-        assert p[:] != 10000
+        try:
+            pool.map(work, range(16))
+        except sharedmem.SlaveException as e:
+            assert isinstance(e.reason, AssertionError)
+            return 
+    raise AssertionError("Shall not reach here.")
 
 if __name__ == "__main__":
     import sys
