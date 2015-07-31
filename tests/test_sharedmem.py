@@ -134,6 +134,23 @@ def test_ordered():
 
     assert (t[1:] > t[:-1]).all()
 
+def test_critical():
+    t = sharedmem.empty(1, dtype='i8')
+    t[:] = 0
+    p = sharedmem.empty(1, dtype='i8')
+    p[:] = 0
+    with sharedmem.MapReduce(np=32) as pool:
+        def work(i):
+            with pool.critical:
+                t[:] += 1
+        pool.map(work, range(10000))
+        def work(i):
+            p[:] += 1
+        pool.map(work, range(10000))
+
+    assert t[:] == 10000
+    assert p[:] != 10000
+
 if __name__ == "__main__":
     import sys
     run_module_suite()
