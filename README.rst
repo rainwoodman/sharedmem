@@ -1,9 +1,10 @@
 Dispatch your trivially parallizable jobs with sharedmem.
 
-Now also supports Python 3.
-
 .. image:: https://api.travis-ci.org/rainwoodman/sharedmem.svg
     :alt: Build Status
+    :target: https://travis-ci.org/rainwoodman/sharedmem/
+
+Now also supports Python 3.
 
 - sharedmem.empty creates numpy arrays to child processes.
 
