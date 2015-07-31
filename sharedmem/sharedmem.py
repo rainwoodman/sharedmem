@@ -425,7 +425,14 @@ class ProcessBackend:
           return lambda:None
 
 class background(object):
-    """ to run a function in async with a process.
+    """ Asyncrhonized function call via a background process.
+
+        Parameters
+        ----------
+        function : callable
+            the function to call
+        *args   : positional arguments
+        **kwargs : keyward arguments
 
         Examples
         --------
@@ -441,11 +448,11 @@ class background(object):
         backend = kwargs.pop('backend', ProcessBackend)
 
         self.result = backend.QueueFactory(1)
-        self.slave = backend.SlaveFactory(target=self.closure, 
+        self.slave = backend.SlaveFactory(target=self._closure, 
                 args=(function, args, kwargs, self.result))
         self.slave.start()
 
-    def closure(self, function, args, kwargs, result):
+    def _closure(self, function, args, kwargs, result):
         try:
             rt = function(*args, **kwargs)
         except Exception as e:
@@ -454,6 +461,10 @@ class background(object):
             result.put((None, rt))
 
     def wait(self):
+        """ Wait and join the child process. 
+            The return value of the function call is returned.
+            If any exception occurred it is wrapped and raised.
+        """
         e, r = self.result.get()
         self.slave.join()
         self.slave = None
@@ -463,6 +474,10 @@ class background(object):
         return r
 
 def MapReduceByThread(np=None):
+    """ Creates a MapReduce object but with the Thread backend.
+
+        The process backend is usually preferred.
+    """
     return MapReduce(backend=ThreadBackend, np=np)
 
 class MapReduce(object):
@@ -472,10 +487,13 @@ class MapReduce(object):
         Parameters
         ----------
         backend : ProcessBackend or ThreadBackend
+            ProcessBackend is preferred. ThreadBackend can be used in cases where
+            processes creation is not allowed.
 
         np   : int or None
             Number of processes to use. Default (None) is from OMP_NUM_THREADS or
-            the number of available cores on the computer.
+            the number of available cores on the computer. If np is 0, all operations
+            are performed on the master process -- no child processes are created.
 
         Notes
         -----
@@ -483,7 +501,6 @@ class MapReduce(object):
 
     """
     def __init__(self, backend=ProcessBackend, np=None):
-        """ if np is 0, run in serial """
         self.backend = backend
         if np is None:
             self.np = cpu_count()
@@ -518,7 +535,7 @@ class MapReduce(object):
         pass
 
     def map(self, func, sequence, reduce=None, star=False):
-        """ Parallel map reduce.
+        """ Map-reduce with multile processes.
 
             Apply func to each item on the sequence, in parallel. 
             As the results are collected, reduce is called on the result.
