@@ -9,5 +9,5 @@ from sys import argv
 
 tester = Tester()
 result = tester.test(extra_argv=['-w', 'tests'] + argv[1:])
-if len(result.errors) > 0:
+if not result:
     raise Exception("Test Failed")
