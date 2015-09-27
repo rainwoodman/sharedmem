@@ -110,7 +110,9 @@ __all__ = ['set_debug', 'get_debug',
         'SlaveException', 'StopProcessGroup',
         'background',
         'MapReduce', 'MapReduceByThread',
-        'empty', 'empty_like', 'copy',
+        'empty', 'empty_like', 
+        'full', 'full_like',
+        'copy',
         ]
 
 import os
@@ -699,12 +701,28 @@ def empty_like(array, dtype=None):
     """ Create a shared memory array from the shape of array.
     """
     if dtype is None: dtype = array.dtype
-    return anonymousmemmap(numpy.broadcast(array, array).shape, dtype)
+    return anonymousmemmap(numpy.asarray(array).shape, dtype)
 
 def empty(shape, dtype='f8'):
     """ Create an empty shared memory array.
     """
     return anonymousmemmap(shape, dtype)
+
+def full_like(array, value, dtype=None):
+    """ Create a shared memory array with the same shape and type as a given array.
+    """
+    if dtype is None: 
+        dtype = numpy.asarray(array).dtype
+    shared = anonymousmemmap(numpy.asarray(array).shape, dtype)
+    shared[:] = value
+    return shared
+    
+def full(shape, value, dtype='f8'):
+    """ Create a shared memory array of given shape and type, filled with `value`.
+    """
+    shared = anonymousmemmap(shape, dtype)
+    shared[:] = value
+    return shared
 
 def copy(a):
     """ Copy an array to the shared memory. 
