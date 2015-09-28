@@ -700,7 +700,8 @@ class MapReduce(object):
 def empty_like(array, dtype=None):
     """ Create a shared memory array from the shape of array.
     """
-    if dtype is None: dtype = array.dtype
+    if dtype is None: 
+        dtype = numpy.asarray(array).dtype
     return anonymousmemmap(numpy.asarray(array).shape, dtype)
 
 def empty(shape, dtype='f8'):
