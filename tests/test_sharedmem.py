@@ -5,6 +5,19 @@ import time
 from numpy.testing import (assert_equal, assert_array_equal,
     assert_almost_equal, assert_array_almost_equal, assert_, run_module_suite)
 import sys
+
+def test_create():
+    a = sharedmem.empty(100, dtype='f8')
+    l = list(a)
+    b = sharedmem.empty_like(a)
+    assert b.shape == a.shape
+    b = sharedmem.empty_like(l)
+    assert b.shape == a.shape
+    c = sharedmem.full(100, 1.0, dtype='f8')
+    assert c.shape == a.shape
+    c = sharedmem.full_like(a, 1.0)
+    assert c.shape == a.shape
+
 def run_idle(pool):
     def work(i):
         time.sleep(0.4)
