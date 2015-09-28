@@ -700,9 +700,10 @@ class MapReduce(object):
 def empty_like(array, dtype=None):
     """ Create a shared memory array from the shape of array.
     """
+    array = numpy.asarray(array)
     if dtype is None: 
-        dtype = numpy.asarray(array).dtype
-    return anonymousmemmap(numpy.asarray(array).shape, dtype)
+        dtype = array.dtype
+    return anonymousmemmap(array.shape, dtype)
 
 def empty(shape, dtype='f8'):
     """ Create an empty shared memory array.
@@ -710,18 +711,16 @@ def empty(shape, dtype='f8'):
     return anonymousmemmap(shape, dtype)
 
 def full_like(array, value, dtype=None):
-    """ Create a shared memory array with the same shape and type as a given array.
+    """ Create a shared memory array with the same shape and type as a given array, filled with `value`.
     """
-    if dtype is None: 
-        dtype = numpy.asarray(array).dtype
-    shared = anonymousmemmap(numpy.asarray(array).shape, dtype)
+    shared = empty_like(array, dtype)
     shared[:] = value
     return shared
     
 def full(shape, value, dtype='f8'):
     """ Create a shared memory array of given shape and type, filled with `value`.
     """
-    shared = anonymousmemmap(shape, dtype)
+    shared = empty(shape, dtype)
     shared[:] = value
     return shared
 
