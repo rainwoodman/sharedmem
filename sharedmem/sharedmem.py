@@ -110,7 +110,9 @@ __all__ = ['set_debug', 'get_debug',
         'SlaveException', 'StopProcessGroup',
         'background',
         'MapReduce', 'MapReduceByThread',
-        'empty', 'empty_like', 'copy',
+        'empty', 'empty_like', 
+        'full', 'full_like',
+        'copy',
         ]
 
 import os
@@ -698,13 +700,29 @@ class MapReduce(object):
 def empty_like(array, dtype=None):
     """ Create a shared memory array from the shape of array.
     """
-    if dtype is None: dtype = array.dtype
-    return anonymousmemmap(numpy.broadcast(array, array).shape, dtype)
+    array = numpy.asarray(array)
+    if dtype is None: 
+        dtype = array.dtype
+    return anonymousmemmap(array.shape, dtype)
 
 def empty(shape, dtype='f8'):
     """ Create an empty shared memory array.
     """
     return anonymousmemmap(shape, dtype)
+
+def full_like(array, value, dtype=None):
+    """ Create a shared memory array with the same shape and type as a given array, filled with `value`.
+    """
+    shared = empty_like(array, dtype)
+    shared[:] = value
+    return shared
+    
+def full(shape, value, dtype='f8'):
+    """ Create a shared memory array of given shape and type, filled with `value`.
+    """
+    shared = empty(shape, dtype)
+    shared[:] = value
+    return shared
 
 def copy(a):
     """ Copy an array to the shared memory. 
