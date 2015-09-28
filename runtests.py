@@ -1,9 +1,10 @@
-import sharedmem
 import sys
 import os
 
 from numpy.testing import Tester
-sys.path.insert(0, os.path.abspath('.'))
+sys.path.insert(0, os.path.abspath('sharedmem'))
+
+import sharedmem
 
 from sys import argv
 
