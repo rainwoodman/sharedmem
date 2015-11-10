@@ -26,8 +26,8 @@
     <link rel="top" title="sharedmem 0.3 documentation" href="../index.html" />
     <link rel="up" title="Module code" href="index.html" /> 
   </head>
-  <body role="document">
-    <div class="related" role="navigation" aria-label="related navigation">
+  <body>
+    <div class="related">
       <h3>Navigation</h3>
       <ul>
         <li class="right" style="margin-right: 10px">
@@ -36,15 +36,15 @@
         <li class="right" >
           <a href="../py-modindex.html" title="Python Module Index"
              >modules</a> |</li>
-        <li class="nav-item nav-item-0"><a href="../index.html">sharedmem 0.3 documentation</a> &raquo;</li>
-          <li class="nav-item nav-item-1"><a href="index.html" accesskey="U">Module code</a> &raquo;</li> 
+        <li><a href="../index.html">sharedmem 0.3 documentation</a> &raquo;</li>
+          <li><a href="index.html" accesskey="U">Module code</a> &raquo;</li> 
       </ul>
     </div>  
 
     <div class="document">
       <div class="documentwrapper">
         <div class="bodywrapper">
-          <div class="body" role="main">
+          <div class="body">
             
   <h1>Source code for sharedmem</h1><div class="highlight"><pre>
 <span class="sd">&quot;&quot;&quot;</span>
@@ -66,13 +66,16 @@
 <span class="sd">    - MapReduce allows the use of critical sections and ordered execution in the work</span>
 <span class="sd">      function.</span>
 
-<span class="sd">    Modifications to shared Memory arrays, allocated via </span>
+<span class="sd">    Shared memory segments can be accessed as numpy arrays, allocated via </span>
 
 <span class="sd">    - :py:meth:`sharedmem.empty`,</span>
 <span class="sd">    - :py:meth:`sharedmem.empty_like`,</span>
 <span class="sd">    - :py:meth:`sharedmem.copy`,</span>
 
-<span class="sd">    are visible by all processes, including the master process.</span>
+<span class="sd">    Shared memory segments are visible by the master process and slave </span>
+<span class="sd">    processes in :py:class:`MapReduce`. Skillful usage of shared memory</span>
+<span class="sd">    segments can avoid Python pickling as a bottle neck in the scalibility of</span>
+<span class="sd">    your code.</span>
 
 <span class="sd">    Usage</span>
 <span class="sd">    -----</span>
@@ -80,30 +83,31 @@
 <span class="sd">    Alternatively, the file :code:`sharedmem.py` can be directly embedded into </span>
 <span class="sd">    other projects.</span>
 
-<span class="sd">    The only external dependency is numpy, since this was designed to</span>
-<span class="sd">    work with large shared memory chunks through numpy.ndarray.</span>
+<span class="sd">    The only external dependency is numpy. sharedmem was designed to</span>
+<span class="sd">    work with large shared memory chunks via numpy.ndarray.</span>
 
-<span class="sd">    Environment variable OMP_NUM_THREADS is used to determine the</span>
-<span class="sd">    default number of slaves.</span>
+<span class="sd">    Environment variable :code:`OMP_NUM_THREADS` is used to determine the</span>
+<span class="sd">    default number of slaves. On PBS/Torque systems, :code:`PBS_NUM_PPN`</span>
+<span class="sd">    is used if `OMP_NUM_THREADS is not defined`</span>
 
-<span class="sd">    Notes</span>
-<span class="sd">    -----</span>
-<span class="sd">    This module depends on the `fork` system call, thus is available</span>
-<span class="sd">    only on posix systems (not Windows).</span>
+<span class="sd">    .. attention ::</span>
+
+<span class="sd">        This module depends on the `fork` system call, thus is available</span>
+<span class="sd">        only on posix systems (not Windows).</span>
 
 <span class="sd">    Examples</span>
 <span class="sd">    --------</span>
 
-<span class="sd">    Sum up a large array</span>
+<span class="sd">    Sum up a large array, printing the progress</span>
 
 <span class="sd">    &gt;&gt;&gt; input = numpy.arange(1024 * 1024 * 128, dtype=&#39;f8&#39;)</span>
 <span class="sd">    &gt;&gt;&gt; output = sharedmem.empty(1024 * 1024 * 128, dtype=&#39;f8&#39;)</span>
-<span class="sd">    &gt;&gt;&gt; with MapReduce() as pool:</span>
+<span class="sd">    &gt;&gt;&gt; with sharedmem.MapReduce() as pool:</span>
 <span class="sd">    &gt;&gt;&gt;    chunksize = 1024 * 1024</span>
 <span class="sd">    &gt;&gt;&gt;    def work(i):</span>
 <span class="sd">    &gt;&gt;&gt;        s = slice (i, i + chunksize)</span>
 <span class="sd">    &gt;&gt;&gt;        output[s] = input[s]</span>
-<span class="sd">    &gt;&gt;&gt;        return i, sum(input[s])</span>
+<span class="sd">    &gt;&gt;&gt;        return i, sum(input[s]) # we use the slower python sum operator</span>
 <span class="sd">    &gt;&gt;&gt;    def reduce(i, r):</span>
 <span class="sd">    &gt;&gt;&gt;        print(&#39;chunk&#39;, i, &#39;done&#39;)</span>
 <span class="sd">    &gt;&gt;&gt;        return r</span>
@@ -111,36 +115,41 @@
 <span class="sd">    &gt;&gt;&gt; print numpy.sum(r)</span>
 <span class="sd">    &gt;&gt;&gt;</span>
 
-<span class="sd">    Textual analysis</span>
+<span class="sd">    Count the total number of bacon and eggs in a directory.</span>
 
-<span class="sd">    &gt;&gt;&gt; input = file(&#39;mytextfile.txt&#39;).readlines()</span>
+<span class="sd">    &gt;&gt;&gt; files = glob.glob(&#39;mydata/*.txt&#39;)</span>
 <span class="sd">    &gt;&gt;&gt; word_count = {&#39;bacon&#39;: 0, &#39;eggs&#39;: 0 }</span>
-<span class="sd">    &gt;&gt;&gt; with MapReduce() as pool:</span>
-<span class="sd">    &gt;&gt;&gt;    def work(line):</span>
-<span class="sd">    &gt;&gt;&gt;        words = line.split()</span>
-<span class="sd">    &gt;&gt;&gt;        for word in words:</span>
-<span class="sd">    &gt;&gt;&gt;            word_count[word] += 1</span>
-<span class="sd">    &gt;&gt;&gt;        return word_count</span>
-<span class="sd">    &gt;&gt;&gt;    def reduce(wc):</span>
+<span class="sd">    &gt;&gt;&gt; with sharedmem.MapReduce() as pool:</span>
+<span class="sd">    &gt;&gt;&gt;    def work(filename):</span>
+<span class="sd">    &gt;&gt;&gt;        f = file(filename, &#39;r&#39;).read()</span>
+<span class="sd">    &gt;&gt;&gt;        wc = dict(word_count) # copy the word_count dict</span>
+<span class="sd">    &gt;&gt;&gt;        for word in f.split():</span>
+<span class="sd">    &gt;&gt;&gt;            if word in wc:</span>
+<span class="sd">    &gt;&gt;&gt;                wc[word] += 1</span>
+<span class="sd">    &gt;&gt;&gt;        return filename, wc</span>
+<span class="sd">    &gt;&gt;&gt;    def reduce(filename, wc):</span>
+<span class="sd">    &gt;&gt;&gt;        print (filename, &#39;done&#39;)</span>
 <span class="sd">    &gt;&gt;&gt;        for key in word_count:</span>
 <span class="sd">    &gt;&gt;&gt;            word_count[key] += wc[key]</span>
+<span class="sd">    &gt;&gt;&gt;    pool.map(work, input, reduce=reduce)</span>
 <span class="sd">    &gt;&gt;&gt; print word_count</span>
 <span class="sd">    &gt;&gt;&gt;</span>
 
 <span class="sd">    pool.ordered can be used to require a block of code to be executed in order</span>
 <span class="sd">    </span>
-<span class="sd">    &gt;&gt;&gt; with MapReduce() as pool:</span>
+<span class="sd">    &gt;&gt;&gt; with sharedmem.MapReduce() as pool:</span>
 <span class="sd">    &gt;&gt;&gt;    def work(i):</span>
 <span class="sd">    &gt;&gt;&gt;         with pool.ordered:</span>
-<span class="sd">    &gt;&gt;&gt;            print(i)</span>
-<span class="sd">    &gt;&gt;&gt;    pool.map(work, range(10))</span>
+<span class="sd">    &gt;&gt;&gt;            print(&#39;Hello World from rank&#39;, i, &#39;/&#39;, pool.np)</span>
+<span class="sd">    &gt;&gt;&gt;    pool.map(work, range(pool.np))</span>
 
-<span class="sd">    pool.critical can be used to require a block of code to be executed in a critical</span>
-<span class="sd">    section.</span>
+<span class="sd">    pool.critical can be used to protect a </span>
+<span class="sd">    block of code, ensuring no two workers enter the code block at the</span>
+<span class="sd">    same time.</span>
 
 <span class="sd">    &gt;&gt;&gt; counter = sharedmem.empty(1)</span>
 <span class="sd">    &gt;&gt;&gt; counter[:] = 0</span>
-<span class="sd">    &gt;&gt;&gt; with MapReduce() as pool:</span>
+<span class="sd">    &gt;&gt;&gt; with sharedmem.MapReduce() as pool:</span>
 <span class="sd">    &gt;&gt;&gt;    def work(i):</span>
 <span class="sd">    &gt;&gt;&gt;         with pool.critical:</span>
 <span class="sd">    &gt;&gt;&gt;             counter[:] += i</span>
@@ -159,7 +168,9 @@
         <span class="s">&#39;SlaveException&#39;</span><span class="p">,</span> <span class="s">&#39;StopProcessGroup&#39;</span><span class="p">,</span>
         <span class="s">&#39;background&#39;</span><span class="p">,</span>
         <span class="s">&#39;MapReduce&#39;</span><span class="p">,</span> <span class="s">&#39;MapReduceByThread&#39;</span><span class="p">,</span>
-        <span class="s">&#39;empty&#39;</span><span class="p">,</span> <span class="s">&#39;empty_like&#39;</span><span class="p">,</span> <span class="s">&#39;copy&#39;</span><span class="p">,</span>
+        <span class="s">&#39;empty&#39;</span><span class="p">,</span> <span class="s">&#39;empty_like&#39;</span><span class="p">,</span> 
+        <span class="s">&#39;full&#39;</span><span class="p">,</span> <span class="s">&#39;full_like&#39;</span><span class="p">,</span>
+        <span class="s">&#39;copy&#39;</span><span class="p">,</span>
         <span class="p">]</span>
 
 <span class="kn">import</span> <span class="nn">os</span>
@@ -195,23 +206,40 @@
 <div class="viewcode-block" id="set_debug"><a class="viewcode-back" href="../index.html#sharedmem.set_debug">[docs]</a><span class="k">def</span> <span class="nf">set_debug</span><span class="p">(</span><span class="n">flag</span><span class="p">):</span>
     <span class="sd">&quot;&quot;&quot; Set the debug mode.</span>
 
-<span class="sd">        In debug mode (flag==True), no slaves are spawn.</span>
-<span class="sd">        All work are done in serial on the master thread/process.</span>
-<span class="sd">        This eases debuggin when the worker throws out an exception. </span>
+<span class="sd">        In debug mode (flag==True), the MapReduce pool will</span>
+<span class="sd">        run the work function on the master thread / process.</span>
+<span class="sd">        This ensures all exceptions can be properly inspected by </span>
+<span class="sd">        a debugger, e.g. pdb.</span>
+
+<span class="sd">        Parameters</span>
+<span class="sd">        ----------</span>
+<span class="sd">        flag : boolean</span>
+<span class="sd">            True for debug mode, False for production mode.</span>
+
+
 <span class="sd">    &quot;&quot;&quot;</span>
     <span class="k">global</span> <span class="n">__shmdebug__</span>
     <span class="n">__shmdebug__</span> <span class="o">=</span> <span class="n">flag</span>
 </div>
 <div class="viewcode-block" id="get_debug"><a class="viewcode-back" href="../index.html#sharedmem.get_debug">[docs]</a><span class="k">def</span> <span class="nf">get_debug</span><span class="p">():</span>
-    <span class="sd">&quot;&quot;&quot; Get the debug mode &quot;&quot;&quot;</span>    
+    <span class="sd">&quot;&quot;&quot; Get the debug mode.</span>
+<span class="sd">        </span>
+<span class="sd">        Returns</span>
+<span class="sd">        -------</span>
+<span class="sd">        The debug mode. True if currently in debugging mode.</span>
+
+<span class="sd">    &quot;&quot;&quot;</span>    
     <span class="k">global</span> <span class="n">__shmdebug__</span>
     <span class="k">return</span> <span class="n">__shmdebug__</span>
 </div>
 <div class="viewcode-block" id="total_memory"><a class="viewcode-back" href="../index.html#sharedmem.total_memory">[docs]</a><span class="k">def</span> <span class="nf">total_memory</span><span class="p">():</span>
     <span class="sd">&quot;&quot;&quot; Returns the the amount of memory available for use.</span>
 
-<span class="sd">        This function is not very useful.</span>
 <span class="sd">        The memory is obtained from MemTotal entry in /proc/meminfo.</span>
+<span class="sd">        </span>
+<span class="sd">        Notes</span>
+<span class="sd">        =====</span>
+<span class="sd">        This function is not very useful and not very portable. </span>
 
 <span class="sd">    &quot;&quot;&quot;</span>
     <span class="k">with</span> <span class="nb">file</span><span class="p">(</span><span class="s">&#39;/proc/meminfo&#39;</span><span class="p">,</span> <span class="s">&#39;r&#39;</span><span class="p">)</span> <span class="k">as</span> <span class="n">f</span><span class="p">:</span>
@@ -222,7 +250,7 @@
     <span class="k">raise</span> <span class="ne">IOError</span><span class="p">(</span><span class="s">&#39;MemTotal unknown&#39;</span><span class="p">)</span>
 </div>
 <div class="viewcode-block" id="cpu_count"><a class="viewcode-back" href="../index.html#sharedmem.cpu_count">[docs]</a><span class="k">def</span> <span class="nf">cpu_count</span><span class="p">():</span>
-    <span class="sd">&quot;&quot;&quot; Returns the number of slave processes to be spawned.</span>
+    <span class="sd">&quot;&quot;&quot; Returns the default number of slave processes to be spawned.</span>
 
 <span class="sd">        The default value is the number of physical cpu cores seen by python.</span>
 <span class="sd">        :code:`OMP_NUM_THREADS` environment variable overrides it.</span>
@@ -242,8 +270,11 @@
     <span class="k">try</span><span class="p">:</span>
         <span class="k">return</span> <span class="nb">int</span><span class="p">(</span><span class="n">num</span><span class="p">)</span>
     <span class="k">except</span><span class="p">:</span>
-        <span class="k">return</span> <span class="n">multiprocessing</span><span class="o">.</span><span class="n">cpu_count</span><span class="p">()</span></div>
+        <span class="k">return</span> <span class="n">multiprocessing</span><span class="o">.</span><span class="n">cpu_count</span><span class="p">()</span>
+</div>
 <span class="k">class</span> <span class="nc">LostExceptionType</span><span class="p">(</span><span class="ne">Warning</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot; Warning issued when a unpicklable exception occurs.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
     <span class="k">pass</span>
 
 <div class="viewcode-block" id="SlaveException"><a class="viewcode-back" href="../index.html#sharedmem.SlaveException">[docs]</a><span class="k">class</span> <span class="nc">SlaveException</span><span class="p">(</span><span class="ne">Exception</span><span class="p">):</span>
@@ -271,7 +302,9 @@
         <span class="ne">Exception</span><span class="o">.</span><span class="n">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="s">&quot;</span><span class="si">%s</span><span class="se">\n</span><span class="si">%s</span><span class="s">&quot;</span> <span class="o">%</span> <span class="p">(</span><span class="nb">str</span><span class="p">(</span><span class="n">reason</span><span class="p">),</span> <span class="nb">str</span><span class="p">(</span><span class="n">traceback</span><span class="p">)))</span>
 </div>
 <div class="viewcode-block" id="StopProcessGroup"><a class="viewcode-back" href="../index.html#sharedmem.StopProcessGroup">[docs]</a><span class="k">class</span> <span class="nc">StopProcessGroup</span><span class="p">(</span><span class="ne">Exception</span><span class="p">):</span>
-    <span class="sd">&quot;&quot;&quot; StopProcessGroup will terminate the slave process/thread &quot;&quot;&quot;</span>
+    <span class="sd">&quot;&quot;&quot; A special type of Exception. </span>
+<span class="sd">        StopProcessGroup will terminate the slave process/thread </span>
+<span class="sd">    &quot;&quot;&quot;</span>
     <span class="k">def</span> <span class="nf">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
         <span class="ne">Exception</span><span class="o">.</span><span class="n">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="s">&quot;StopProcessGroup&quot;</span><span class="p">)</span>
 </div>
@@ -415,7 +448,8 @@
 <span class="sd">            raise an StopProcessGroup exception.</span>
 
 <span class="sd">            A slave process will terminate upon StopProcessGroup.</span>
-<span class="sd">            The master process shall read the error</span>
+<span class="sd">            The master process shall read the error from the process group.</span>
+
 <span class="sd">        &quot;&quot;&quot;</span>
         <span class="k">while</span> <span class="bp">self</span><span class="o">.</span><span class="n">Errors</span><span class="o">.</span><span class="n">empty</span><span class="p">():</span>
             <span class="k">try</span><span class="p">:</span>
@@ -747,13 +781,29 @@
 <div class="viewcode-block" id="empty_like"><a class="viewcode-back" href="../index.html#sharedmem.empty_like">[docs]</a><span class="k">def</span> <span class="nf">empty_like</span><span class="p">(</span><span class="n">array</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="bp">None</span><span class="p">):</span>
     <span class="sd">&quot;&quot;&quot; Create a shared memory array from the shape of array.</span>
 <span class="sd">    &quot;&quot;&quot;</span>
-    <span class="k">if</span> <span class="n">dtype</span> <span class="ow">is</span> <span class="bp">None</span><span class="p">:</span> <span class="n">dtype</span> <span class="o">=</span> <span class="n">array</span><span class="o">.</span><span class="n">dtype</span>
-    <span class="k">return</span> <span class="n">anonymousmemmap</span><span class="p">(</span><span class="n">numpy</span><span class="o">.</span><span class="n">broadcast</span><span class="p">(</span><span class="n">array</span><span class="p">,</span> <span class="n">array</span><span class="p">)</span><span class="o">.</span><span class="n">shape</span><span class="p">,</span> <span class="n">dtype</span><span class="p">)</span>
+    <span class="n">array</span> <span class="o">=</span> <span class="n">numpy</span><span class="o">.</span><span class="n">asarray</span><span class="p">(</span><span class="n">array</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">dtype</span> <span class="ow">is</span> <span class="bp">None</span><span class="p">:</span> 
+        <span class="n">dtype</span> <span class="o">=</span> <span class="n">array</span><span class="o">.</span><span class="n">dtype</span>
+    <span class="k">return</span> <span class="n">anonymousmemmap</span><span class="p">(</span><span class="n">array</span><span class="o">.</span><span class="n">shape</span><span class="p">,</span> <span class="n">dtype</span><span class="p">)</span>
 </div>
 <div class="viewcode-block" id="empty"><a class="viewcode-back" href="../index.html#sharedmem.empty">[docs]</a><span class="k">def</span> <span class="nf">empty</span><span class="p">(</span><span class="n">shape</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="s">&#39;f8&#39;</span><span class="p">):</span>
     <span class="sd">&quot;&quot;&quot; Create an empty shared memory array.</span>
 <span class="sd">    &quot;&quot;&quot;</span>
     <span class="k">return</span> <span class="n">anonymousmemmap</span><span class="p">(</span><span class="n">shape</span><span class="p">,</span> <span class="n">dtype</span><span class="p">)</span>
+</div>
+<div class="viewcode-block" id="full_like"><a class="viewcode-back" href="../index.html#sharedmem.full_like">[docs]</a><span class="k">def</span> <span class="nf">full_like</span><span class="p">(</span><span class="n">array</span><span class="p">,</span> <span class="n">value</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="bp">None</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot; Create a shared memory array with the same shape and type as a given array, filled with `value`.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">shared</span> <span class="o">=</span> <span class="n">empty_like</span><span class="p">(</span><span class="n">array</span><span class="p">,</span> <span class="n">dtype</span><span class="p">)</span>
+    <span class="n">shared</span><span class="p">[:]</span> <span class="o">=</span> <span class="n">value</span>
+    <span class="k">return</span> <span class="n">shared</span>
+    </div>
+<div class="viewcode-block" id="full"><a class="viewcode-back" href="../index.html#sharedmem.full">[docs]</a><span class="k">def</span> <span class="nf">full</span><span class="p">(</span><span class="n">shape</span><span class="p">,</span> <span class="n">value</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="s">&#39;f8&#39;</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot; Create a shared memory array of given shape and type, filled with `value`.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">shared</span> <span class="o">=</span> <span class="n">empty</span><span class="p">(</span><span class="n">shape</span><span class="p">,</span> <span class="n">dtype</span><span class="p">)</span>
+    <span class="n">shared</span><span class="p">[:]</span> <span class="o">=</span> <span class="n">value</span>
+    <span class="k">return</span> <span class="n">shared</span>
 </div>
 <div class="viewcode-block" id="copy"><a class="viewcode-back" href="../index.html#sharedmem.copy">[docs]</a><span class="k">def</span> <span class="nf">copy</span><span class="p">(</span><span class="n">a</span><span class="p">):</span>
     <span class="sd">&quot;&quot;&quot; Copy an array to the shared memory. </span>
@@ -829,9 +879,9 @@
           </div>
         </div>
       </div>
-      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+      <div class="sphinxsidebar">
         <div class="sphinxsidebarwrapper">
-<div id="searchbox" style="display: none" role="search">
+<div id="searchbox" style="display: none">
   <h3>Quick search</h3>
     <form class="search" action="../search.html" method="get">
       <input type="text" name="q" />
@@ -848,7 +898,7 @@
       </div>
       <div class="clearer"></div>
     </div>
-    <div class="related" role="navigation" aria-label="related navigation">
+    <div class="related">
       <h3>Navigation</h3>
       <ul>
         <li class="right" style="margin-right: 10px">
@@ -857,13 +907,13 @@
         <li class="right" >
           <a href="../py-modindex.html" title="Python Module Index"
              >modules</a> |</li>
-        <li class="nav-item nav-item-0"><a href="../index.html">sharedmem 0.3 documentation</a> &raquo;</li>
-          <li class="nav-item nav-item-1"><a href="index.html" >Module code</a> &raquo;</li> 
+        <li><a href="../index.html">sharedmem 0.3 documentation</a> &raquo;</li>
+          <li><a href="index.html" >Module code</a> &raquo;</li> 
       </ul>
     </div>
-    <div class="footer" role="contentinfo">
+    <div class="footer">
         &copy; Copyright 2015, Yu Feng.
-      Created using <a href="http://sphinx-doc.org/">Sphinx</a> 1.3.1.
+      Created using <a href="http://sphinx-doc.org/">Sphinx</a> 1.2.3.
     </div>
   </body>
 </html>

@@ -25,8 +25,8 @@
     <script type="text/javascript" src="_static/doctools.js"></script>
     <link rel="top" title="sharedmem 0.3 documentation" href="#" /> 
   </head>
-  <body role="document">
-    <div class="related" role="navigation" aria-label="related navigation">
+  <body>
+    <div class="related">
       <h3>Navigation</h3>
       <ul>
         <li class="right" style="margin-right: 10px">
@@ -35,14 +35,14 @@
         <li class="right" >
           <a href="py-modindex.html" title="Python Module Index"
              >modules</a> |</li>
-        <li class="nav-item nav-item-0"><a href="#">sharedmem 0.3 documentation</a> &raquo;</li> 
+        <li><a href="#">sharedmem 0.3 documentation</a> &raquo;</li> 
       </ul>
     </div>  
 
     <div class="document">
       <div class="documentwrapper">
         <div class="bodywrapper">
-          <div class="body" role="main">
+          <div class="body">
             
   <div class="section" id="module-sharedmem">
 <span id="sharedmem-package"></span><h1>sharedmem package<a class="headerlink" href="#module-sharedmem" title="Permalink to this headline">¶</a></h1>
@@ -53,14 +53,13 @@
 <ul class="simple">
 <li><a class="reference internal" href="#programming-model" id="id1">Programming Model</a></li>
 <li><a class="reference internal" href="#usage" id="id2">Usage</a></li>
-<li><a class="reference internal" href="#notes" id="id3">Notes</a></li>
-<li><a class="reference internal" href="#examples" id="id4">Examples</a></li>
-<li><a class="reference internal" href="#api-references" id="id5">API References</a></li>
+<li><a class="reference internal" href="#examples" id="id3">Examples</a></li>
+<li><a class="reference internal" href="#api-references" id="id4">API References</a></li>
 </ul>
 </div>
 <div class="section" id="programming-model">
 <h2><a class="toc-backref" href="#id1">Programming Model</a><a class="headerlink" href="#programming-model" title="Permalink to this headline">¶</a></h2>
-<p><a class="reference internal" href="#sharedmem.MapReduce" title="sharedmem.MapReduce"><code class="xref py py-class docutils literal"><span class="pre">MapReduce</span></code></a> provides the equivalent to multiprocessing.Pool, with the following
+<p><a class="reference internal" href="#sharedmem.MapReduce" title="sharedmem.MapReduce"><tt class="xref py py-class docutils literal"><span class="pre">MapReduce</span></tt></a> provides the equivalent to multiprocessing.Pool, with the following
 differences:</p>
 <ul class="simple">
 <li>MapReduce does not require the work function to be picklable.</li>
@@ -69,40 +68,44 @@ scope.</li>
 <li>MapReduce allows the use of critical sections and ordered execution in the work
 function.</li>
 </ul>
-<p>Modifications to shared Memory arrays, allocated via</p>
+<p>Shared memory segments can be accessed as numpy arrays, allocated via</p>
 <ul class="simple">
-<li><a class="reference internal" href="#sharedmem.empty" title="sharedmem.empty"><code class="xref py py-meth docutils literal"><span class="pre">sharedmem.empty()</span></code></a>,</li>
-<li><a class="reference internal" href="#sharedmem.empty_like" title="sharedmem.empty_like"><code class="xref py py-meth docutils literal"><span class="pre">sharedmem.empty_like()</span></code></a>,</li>
-<li><a class="reference internal" href="#sharedmem.copy" title="sharedmem.copy"><code class="xref py py-meth docutils literal"><span class="pre">sharedmem.copy()</span></code></a>,</li>
+<li><a class="reference internal" href="#sharedmem.empty" title="sharedmem.empty"><tt class="xref py py-meth docutils literal"><span class="pre">sharedmem.empty()</span></tt></a>,</li>
+<li><a class="reference internal" href="#sharedmem.empty_like" title="sharedmem.empty_like"><tt class="xref py py-meth docutils literal"><span class="pre">sharedmem.empty_like()</span></tt></a>,</li>
+<li><a class="reference internal" href="#sharedmem.copy" title="sharedmem.copy"><tt class="xref py py-meth docutils literal"><span class="pre">sharedmem.copy()</span></tt></a>,</li>
 </ul>
-<p>are visible by all processes, including the master process.</p>
+<p>Shared memory segments are visible by the master process and slave 
+processes in <a class="reference internal" href="#sharedmem.MapReduce" title="sharedmem.MapReduce"><tt class="xref py py-class docutils literal"><span class="pre">MapReduce</span></tt></a>. Skillful usage of shared memory
+segments can avoid Python pickling as a bottle neck in the scalibility of
+your code.</p>
 </div>
 <div class="section" id="usage">
 <h2><a class="toc-backref" href="#id2">Usage</a><a class="headerlink" href="#usage" title="Permalink to this headline">¶</a></h2>
-<p>The package can be installed via <code class="code docutils literal"><span class="pre">easy_install</span> <span class="pre">sharedmem</span></code>.
-Alternatively, the file <code class="code docutils literal"><span class="pre">sharedmem.py</span></code> can be directly embedded into 
+<p>The package can be installed via <tt class="code docutils literal"><span class="pre">easy_install</span> <span class="pre">sharedmem</span></tt>.
+Alternatively, the file <tt class="code docutils literal"><span class="pre">sharedmem.py</span></tt> can be directly embedded into 
 other projects.</p>
-<p>The only external dependency is numpy, since this was designed to
-work with large shared memory chunks through numpy.ndarray.</p>
-<p>Environment variable OMP_NUM_THREADS is used to determine the
-default number of slaves.</p>
-</div>
-<div class="section" id="notes">
-<h2><a class="toc-backref" href="#id3">Notes</a><a class="headerlink" href="#notes" title="Permalink to this headline">¶</a></h2>
-<p>This module depends on the <cite>fork</cite> system call, thus is available
+<p>The only external dependency is numpy. sharedmem was designed to
+work with large shared memory chunks via numpy.ndarray.</p>
+<p>Environment variable <tt class="code docutils literal"><span class="pre">OMP_NUM_THREADS</span></tt> is used to determine the
+default number of slaves. On PBS/Torque systems, <tt class="code docutils literal"><span class="pre">PBS_NUM_PPN</span></tt>
+is used if <cite>OMP_NUM_THREADS is not defined</cite></p>
+<div class="admonition attention">
+<p class="first admonition-title">Attention</p>
+<p class="last">This module depends on the <cite>fork</cite> system call, thus is available
 only on posix systems (not Windows).</p>
 </div>
+</div>
 <div class="section" id="examples">
-<h2><a class="toc-backref" href="#id4">Examples</a><a class="headerlink" href="#examples" title="Permalink to this headline">¶</a></h2>
-<p>Sum up a large array</p>
+<h2><a class="toc-backref" href="#id3">Examples</a><a class="headerlink" href="#examples" title="Permalink to this headline">¶</a></h2>
+<p>Sum up a large array, printing the progress</p>
 <div class="highlight-python"><div class="highlight"><pre><span class="gp">&gt;&gt;&gt; </span><span class="nb">input</span> <span class="o">=</span> <span class="n">numpy</span><span class="o">.</span><span class="n">arange</span><span class="p">(</span><span class="mi">1024</span> <span class="o">*</span> <span class="mi">1024</span> <span class="o">*</span> <span class="mi">128</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="s">&#39;f8&#39;</span><span class="p">)</span>
 <span class="gp">&gt;&gt;&gt; </span><span class="n">output</span> <span class="o">=</span> <span class="n">sharedmem</span><span class="o">.</span><span class="n">empty</span><span class="p">(</span><span class="mi">1024</span> <span class="o">*</span> <span class="mi">1024</span> <span class="o">*</span> <span class="mi">128</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="s">&#39;f8&#39;</span><span class="p">)</span>
-<span class="gp">&gt;&gt;&gt; </span><span class="k">with</span> <span class="n">MapReduce</span><span class="p">()</span> <span class="k">as</span> <span class="n">pool</span><span class="p">:</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="k">with</span> <span class="n">sharedmem</span><span class="o">.</span><span class="n">MapReduce</span><span class="p">()</span> <span class="k">as</span> <span class="n">pool</span><span class="p">:</span>
 <span class="gp">&gt;&gt;&gt; </span>   <span class="n">chunksize</span> <span class="o">=</span> <span class="mi">1024</span> <span class="o">*</span> <span class="mi">1024</span>
 <span class="gp">&gt;&gt;&gt; </span>   <span class="k">def</span> <span class="nf">work</span><span class="p">(</span><span class="n">i</span><span class="p">):</span>
 <span class="gp">&gt;&gt;&gt; </span>       <span class="n">s</span> <span class="o">=</span> <span class="nb">slice</span> <span class="p">(</span><span class="n">i</span><span class="p">,</span> <span class="n">i</span> <span class="o">+</span> <span class="n">chunksize</span><span class="p">)</span>
 <span class="gp">&gt;&gt;&gt; </span>       <span class="n">output</span><span class="p">[</span><span class="n">s</span><span class="p">]</span> <span class="o">=</span> <span class="nb">input</span><span class="p">[</span><span class="n">s</span><span class="p">]</span>
-<span class="gp">&gt;&gt;&gt; </span>       <span class="k">return</span> <span class="n">i</span><span class="p">,</span> <span class="nb">sum</span><span class="p">(</span><span class="nb">input</span><span class="p">[</span><span class="n">s</span><span class="p">])</span>
+<span class="gp">&gt;&gt;&gt; </span>       <span class="k">return</span> <span class="n">i</span><span class="p">,</span> <span class="nb">sum</span><span class="p">(</span><span class="nb">input</span><span class="p">[</span><span class="n">s</span><span class="p">])</span> <span class="c"># we use the slower python sum operator</span>
 <span class="gp">&gt;&gt;&gt; </span>   <span class="k">def</span> <span class="nf">reduce</span><span class="p">(</span><span class="n">i</span><span class="p">,</span> <span class="n">r</span><span class="p">):</span>
 <span class="gp">&gt;&gt;&gt; </span>       <span class="k">print</span><span class="p">(</span><span class="s">&#39;chunk&#39;</span><span class="p">,</span> <span class="n">i</span><span class="p">,</span> <span class="s">&#39;done&#39;</span><span class="p">)</span>
 <span class="gp">&gt;&gt;&gt; </span>       <span class="k">return</span> <span class="n">r</span>
@@ -111,35 +114,40 @@ only on posix systems (not Windows).</p>
 <span class="go">&gt;&gt;&gt;</span>
 </pre></div>
 </div>
-<p>Textual analysis</p>
-<div class="highlight-python"><div class="highlight"><pre><span class="gp">&gt;&gt;&gt; </span><span class="nb">input</span> <span class="o">=</span> <span class="nb">file</span><span class="p">(</span><span class="s">&#39;mytextfile.txt&#39;</span><span class="p">)</span><span class="o">.</span><span class="n">readlines</span><span class="p">()</span>
+<p>Count the total number of bacon and eggs in a directory.</p>
+<div class="highlight-python"><div class="highlight"><pre><span class="gp">&gt;&gt;&gt; </span><span class="n">files</span> <span class="o">=</span> <span class="n">glob</span><span class="o">.</span><span class="n">glob</span><span class="p">(</span><span class="s">&#39;mydata/*.txt&#39;</span><span class="p">)</span>
 <span class="gp">&gt;&gt;&gt; </span><span class="n">word_count</span> <span class="o">=</span> <span class="p">{</span><span class="s">&#39;bacon&#39;</span><span class="p">:</span> <span class="mi">0</span><span class="p">,</span> <span class="s">&#39;eggs&#39;</span><span class="p">:</span> <span class="mi">0</span> <span class="p">}</span>
-<span class="gp">&gt;&gt;&gt; </span><span class="k">with</span> <span class="n">MapReduce</span><span class="p">()</span> <span class="k">as</span> <span class="n">pool</span><span class="p">:</span>
-<span class="gp">&gt;&gt;&gt; </span>   <span class="k">def</span> <span class="nf">work</span><span class="p">(</span><span class="n">line</span><span class="p">):</span>
-<span class="gp">&gt;&gt;&gt; </span>       <span class="n">words</span> <span class="o">=</span> <span class="n">line</span><span class="o">.</span><span class="n">split</span><span class="p">()</span>
-<span class="gp">&gt;&gt;&gt; </span>       <span class="k">for</span> <span class="n">word</span> <span class="ow">in</span> <span class="n">words</span><span class="p">:</span>
-<span class="gp">&gt;&gt;&gt; </span>           <span class="n">word_count</span><span class="p">[</span><span class="n">word</span><span class="p">]</span> <span class="o">+=</span> <span class="mi">1</span>
-<span class="gp">&gt;&gt;&gt; </span>       <span class="k">return</span> <span class="n">word_count</span>
-<span class="gp">&gt;&gt;&gt; </span>   <span class="k">def</span> <span class="nf">reduce</span><span class="p">(</span><span class="n">wc</span><span class="p">):</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="k">with</span> <span class="n">sharedmem</span><span class="o">.</span><span class="n">MapReduce</span><span class="p">()</span> <span class="k">as</span> <span class="n">pool</span><span class="p">:</span>
+<span class="gp">&gt;&gt;&gt; </span>   <span class="k">def</span> <span class="nf">work</span><span class="p">(</span><span class="n">filename</span><span class="p">):</span>
+<span class="gp">&gt;&gt;&gt; </span>       <span class="n">f</span> <span class="o">=</span> <span class="nb">file</span><span class="p">(</span><span class="n">filename</span><span class="p">,</span> <span class="s">&#39;r&#39;</span><span class="p">)</span><span class="o">.</span><span class="n">read</span><span class="p">()</span>
+<span class="gp">&gt;&gt;&gt; </span>       <span class="n">wc</span> <span class="o">=</span> <span class="nb">dict</span><span class="p">(</span><span class="n">word_count</span><span class="p">)</span> <span class="c"># copy the word_count dict</span>
+<span class="gp">&gt;&gt;&gt; </span>       <span class="k">for</span> <span class="n">word</span> <span class="ow">in</span> <span class="n">f</span><span class="o">.</span><span class="n">split</span><span class="p">():</span>
+<span class="gp">&gt;&gt;&gt; </span>           <span class="k">if</span> <span class="n">word</span> <span class="ow">in</span> <span class="n">wc</span><span class="p">:</span>
+<span class="gp">&gt;&gt;&gt; </span>               <span class="n">wc</span><span class="p">[</span><span class="n">word</span><span class="p">]</span> <span class="o">+=</span> <span class="mi">1</span>
+<span class="gp">&gt;&gt;&gt; </span>       <span class="k">return</span> <span class="n">filename</span><span class="p">,</span> <span class="n">wc</span>
+<span class="gp">&gt;&gt;&gt; </span>   <span class="k">def</span> <span class="nf">reduce</span><span class="p">(</span><span class="n">filename</span><span class="p">,</span> <span class="n">wc</span><span class="p">):</span>
+<span class="gp">&gt;&gt;&gt; </span>       <span class="k">print</span> <span class="p">(</span><span class="n">filename</span><span class="p">,</span> <span class="s">&#39;done&#39;</span><span class="p">)</span>
 <span class="gp">&gt;&gt;&gt; </span>       <span class="k">for</span> <span class="n">key</span> <span class="ow">in</span> <span class="n">word_count</span><span class="p">:</span>
 <span class="gp">&gt;&gt;&gt; </span>           <span class="n">word_count</span><span class="p">[</span><span class="n">key</span><span class="p">]</span> <span class="o">+=</span> <span class="n">wc</span><span class="p">[</span><span class="n">key</span><span class="p">]</span>
+<span class="gp">&gt;&gt;&gt; </span>   <span class="n">pool</span><span class="o">.</span><span class="n">map</span><span class="p">(</span><span class="n">work</span><span class="p">,</span> <span class="nb">input</span><span class="p">,</span> <span class="nb">reduce</span><span class="o">=</span><span class="nb">reduce</span><span class="p">)</span>
 <span class="gp">&gt;&gt;&gt; </span><span class="k">print</span> <span class="n">word_count</span>
 <span class="go">&gt;&gt;&gt;</span>
 </pre></div>
 </div>
 <p>pool.ordered can be used to require a block of code to be executed in order</p>
-<div class="highlight-python"><div class="highlight"><pre><span class="gp">&gt;&gt;&gt; </span><span class="k">with</span> <span class="n">MapReduce</span><span class="p">()</span> <span class="k">as</span> <span class="n">pool</span><span class="p">:</span>
+<div class="highlight-python"><div class="highlight"><pre><span class="gp">&gt;&gt;&gt; </span><span class="k">with</span> <span class="n">sharedmem</span><span class="o">.</span><span class="n">MapReduce</span><span class="p">()</span> <span class="k">as</span> <span class="n">pool</span><span class="p">:</span>
 <span class="gp">&gt;&gt;&gt; </span>   <span class="k">def</span> <span class="nf">work</span><span class="p">(</span><span class="n">i</span><span class="p">):</span>
 <span class="gp">&gt;&gt;&gt; </span>        <span class="k">with</span> <span class="n">pool</span><span class="o">.</span><span class="n">ordered</span><span class="p">:</span>
-<span class="gp">&gt;&gt;&gt; </span>           <span class="k">print</span><span class="p">(</span><span class="n">i</span><span class="p">)</span>
-<span class="gp">&gt;&gt;&gt; </span>   <span class="n">pool</span><span class="o">.</span><span class="n">map</span><span class="p">(</span><span class="n">work</span><span class="p">,</span> <span class="nb">range</span><span class="p">(</span><span class="mi">10</span><span class="p">))</span>
+<span class="gp">&gt;&gt;&gt; </span>           <span class="k">print</span><span class="p">(</span><span class="s">&#39;Hello World from rank&#39;</span><span class="p">,</span> <span class="n">i</span><span class="p">,</span> <span class="s">&#39;/&#39;</span><span class="p">,</span> <span class="n">pool</span><span class="o">.</span><span class="n">np</span><span class="p">)</span>
+<span class="gp">&gt;&gt;&gt; </span>   <span class="n">pool</span><span class="o">.</span><span class="n">map</span><span class="p">(</span><span class="n">work</span><span class="p">,</span> <span class="nb">range</span><span class="p">(</span><span class="n">pool</span><span class="o">.</span><span class="n">np</span><span class="p">))</span>
 </pre></div>
 </div>
-<p>pool.critical can be used to require a block of code to be executed in a critical
-section.</p>
+<p>pool.critical can be used to protect a 
+block of code, ensuring no two workers enter the code block at the
+same time.</p>
 <div class="highlight-python"><div class="highlight"><pre><span class="gp">&gt;&gt;&gt; </span><span class="n">counter</span> <span class="o">=</span> <span class="n">sharedmem</span><span class="o">.</span><span class="n">empty</span><span class="p">(</span><span class="mi">1</span><span class="p">)</span>
 <span class="gp">&gt;&gt;&gt; </span><span class="n">counter</span><span class="p">[:]</span> <span class="o">=</span> <span class="mi">0</span>
-<span class="gp">&gt;&gt;&gt; </span><span class="k">with</span> <span class="n">MapReduce</span><span class="p">()</span> <span class="k">as</span> <span class="n">pool</span><span class="p">:</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="k">with</span> <span class="n">sharedmem</span><span class="o">.</span><span class="n">MapReduce</span><span class="p">()</span> <span class="k">as</span> <span class="n">pool</span><span class="p">:</span>
 <span class="gp">&gt;&gt;&gt; </span>   <span class="k">def</span> <span class="nf">work</span><span class="p">(</span><span class="n">i</span><span class="p">):</span>
 <span class="gp">&gt;&gt;&gt; </span>        <span class="k">with</span> <span class="n">pool</span><span class="o">.</span><span class="n">critical</span><span class="p">:</span>
 <span class="gp">&gt;&gt;&gt; </span>            <span class="n">counter</span><span class="p">[:]</span> <span class="o">+=</span> <span class="n">i</span>
@@ -149,38 +157,60 @@ section.</p>
 </div>
 </div>
 <div class="section" id="api-references">
-<h2><a class="toc-backref" href="#id5">API References</a><a class="headerlink" href="#api-references" title="Permalink to this headline">¶</a></h2>
+<h2><a class="toc-backref" href="#id4">API References</a><a class="headerlink" href="#api-references" title="Permalink to this headline">¶</a></h2>
 <dl class="function">
 <dt id="sharedmem.set_debug">
-<code class="descclassname">sharedmem.</code><code class="descname">set_debug</code><span class="sig-paren">(</span><em>flag</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/sharedmem.html#set_debug"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#sharedmem.set_debug" title="Permalink to this definition">¶</a></dt>
+<tt class="descclassname">sharedmem.</tt><tt class="descname">set_debug</tt><big>(</big><em>flag</em><big>)</big><a class="reference internal" href="_modules/sharedmem.html#set_debug"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#sharedmem.set_debug" title="Permalink to this definition">¶</a></dt>
 <dd><p>Set the debug mode.</p>
-<p>In debug mode (flag==True), no slaves are spawn.
-All work are done in serial on the master thread/process.
-This eases debuggin when the worker throws out an exception.</p>
+<p>In debug mode (flag==True), the MapReduce pool will
+run the work function on the master thread / process.
+This ensures all exceptions can be properly inspected by 
+a debugger, e.g. pdb.</p>
+<table class="docutils field-list" frame="void" rules="none">
+<col class="field-name" />
+<col class="field-body" />
+<tbody valign="top">
+<tr class="field-odd field"><th class="field-name">Parameters:</th><td class="field-body"><p class="first"><strong>flag</strong> : boolean</p>
+<blockquote class="last">
+<div><p>True for debug mode, False for production mode.</p>
+</div></blockquote>
+</td>
+</tr>
+</tbody>
+</table>
 </dd></dl>
 
 <dl class="function">
 <dt id="sharedmem.get_debug">
-<code class="descclassname">sharedmem.</code><code class="descname">get_debug</code><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="_modules/sharedmem.html#get_debug"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#sharedmem.get_debug" title="Permalink to this definition">¶</a></dt>
-<dd><p>Get the debug mode</p>
+<tt class="descclassname">sharedmem.</tt><tt class="descname">get_debug</tt><big>(</big><big>)</big><a class="reference internal" href="_modules/sharedmem.html#get_debug"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#sharedmem.get_debug" title="Permalink to this definition">¶</a></dt>
+<dd><p>Get the debug mode.</p>
+<table class="docutils field-list" frame="void" rules="none">
+<col class="field-name" />
+<col class="field-body" />
+<tbody valign="top">
+<tr class="field-odd field"><th class="field-name">Returns:</th><td class="field-body">The debug mode. True if currently in debugging mode.</td>
+</tr>
+</tbody>
+</table>
 </dd></dl>
 
 <dl class="function">
 <dt id="sharedmem.total_memory">
-<code class="descclassname">sharedmem.</code><code class="descname">total_memory</code><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="_modules/sharedmem.html#total_memory"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#sharedmem.total_memory" title="Permalink to this definition">¶</a></dt>
+<tt class="descclassname">sharedmem.</tt><tt class="descname">total_memory</tt><big>(</big><big>)</big><a class="reference internal" href="_modules/sharedmem.html#total_memory"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#sharedmem.total_memory" title="Permalink to this definition">¶</a></dt>
 <dd><p>Returns the the amount of memory available for use.</p>
-<p>This function is not very useful.
-The memory is obtained from MemTotal entry in /proc/meminfo.</p>
+<p>The memory is obtained from MemTotal entry in /proc/meminfo.</p>
+<p class="rubric">Notes</p>
+<p>This function is not very useful and not very portable.</p>
 </dd></dl>
 
 <dl class="function">
 <dt id="sharedmem.cpu_count">
-<code class="descclassname">sharedmem.</code><code class="descname">cpu_count</code><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="_modules/sharedmem.html#cpu_count"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#sharedmem.cpu_count" title="Permalink to this definition">¶</a></dt>
-<dd><p>Returns the number of slave processes to be spawned.</p>
+<tt class="descclassname">sharedmem.</tt><tt class="descname">cpu_count</tt><big>(</big><big>)</big><a class="reference internal" href="_modules/sharedmem.html#cpu_count"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#sharedmem.cpu_count" title="Permalink to this definition">¶</a></dt>
+<dd><p>Returns the default number of slave processes to be spawned.</p>
 <p>The default value is the number of physical cpu cores seen by python.
-<code class="code docutils literal"><span class="pre">OMP_NUM_THREADS</span></code> environment variable overrides it.</p>
+<tt class="code docutils literal"><span class="pre">OMP_NUM_THREADS</span></tt> environment variable overrides it.</p>
 <p>On PBS/torque systems if OMP_NUM_THREADS is empty, we try to
-use the value of <code class="code docutils literal"><span class="pre">PBS_NUM_PPN</span></code> variable.</p>
+use the value of <tt class="code docutils literal"><span class="pre">PBS_NUM_PPN</span></tt> variable.</p>
 <p class="rubric">Notes</p>
 <p>On some machines the physical number of cores does not equal
 the number of cpus shall be used. PSC Blacklight for example.</p>
@@ -188,8 +218,8 @@ the number of cpus shall be used. PSC Blacklight for example.</p>
 
 <dl class="exception">
 <dt id="sharedmem.SlaveException">
-<em class="property">exception </em><code class="descclassname">sharedmem.</code><code class="descname">SlaveException</code><span class="sig-paren">(</span><em>reason</em>, <em>traceback</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/sharedmem.html#SlaveException"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#sharedmem.SlaveException" title="Permalink to this definition">¶</a></dt>
-<dd><p>Bases: <code class="xref py py-class docutils literal"><span class="pre">exceptions.Exception</span></code></p>
+<em class="property">exception </em><tt class="descclassname">sharedmem.</tt><tt class="descname">SlaveException</tt><big>(</big><em>reason</em>, <em>traceback</em><big>)</big><a class="reference internal" href="_modules/sharedmem.html#SlaveException"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#sharedmem.SlaveException" title="Permalink to this definition">¶</a></dt>
+<dd><p>Bases: <tt class="xref py py-class docutils literal"><span class="pre">exceptions.Exception</span></tt></p>
 <p>Represents an exception that has occured during a slave process</p>
 <p class="rubric">Attributes</p>
 <table border="1" class="docutils">
@@ -210,15 +240,16 @@ the number of cpus shall be used. PSC Blacklight for example.</p>
 
 <dl class="exception">
 <dt id="sharedmem.StopProcessGroup">
-<em class="property">exception </em><code class="descclassname">sharedmem.</code><code class="descname">StopProcessGroup</code><a class="reference internal" href="_modules/sharedmem.html#StopProcessGroup"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#sharedmem.StopProcessGroup" title="Permalink to this definition">¶</a></dt>
-<dd><p>Bases: <code class="xref py py-class docutils literal"><span class="pre">exceptions.Exception</span></code></p>
-<p>StopProcessGroup will terminate the slave process/thread</p>
+<em class="property">exception </em><tt class="descclassname">sharedmem.</tt><tt class="descname">StopProcessGroup</tt><a class="reference internal" href="_modules/sharedmem.html#StopProcessGroup"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#sharedmem.StopProcessGroup" title="Permalink to this definition">¶</a></dt>
+<dd><p>Bases: <tt class="xref py py-class docutils literal"><span class="pre">exceptions.Exception</span></tt></p>
+<p>A special type of Exception. 
+StopProcessGroup will terminate the slave process/thread</p>
 </dd></dl>
 
 <dl class="class">
 <dt id="sharedmem.background">
-<em class="property">class </em><code class="descclassname">sharedmem.</code><code class="descname">background</code><span class="sig-paren">(</span><em>function</em>, <em>*args</em>, <em>**kwargs</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/sharedmem.html#background"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#sharedmem.background" title="Permalink to this definition">¶</a></dt>
-<dd><p>Bases: <code class="xref py py-class docutils literal"><span class="pre">object</span></code></p>
+<em class="property">class </em><tt class="descclassname">sharedmem.</tt><tt class="descname">background</tt><big>(</big><em>function</em>, <em>*args</em>, <em>**kwargs</em><big>)</big><a class="reference internal" href="_modules/sharedmem.html#background"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#sharedmem.background" title="Permalink to this definition">¶</a></dt>
+<dd><p>Bases: <tt class="xref py py-class docutils literal"><span class="pre">object</span></tt></p>
 <p>Asyncrhonized function call via a background process.</p>
 <table class="docutils field-list" frame="void" rules="none">
 <col class="field-name" />
@@ -248,14 +279,14 @@ the number of cpus shall be used. PSC Blacklight for example.</p>
 <col width="90%" />
 </colgroup>
 <tbody valign="top">
-<tr class="row-odd"><td><a class="reference internal" href="#sharedmem.background.wait" title="sharedmem.background.wait"><code class="xref py py-obj docutils literal"><span class="pre">wait</span></code></a>()</td>
+<tr class="row-odd"><td><a class="reference internal" href="#sharedmem.background.wait" title="sharedmem.background.wait"><tt class="xref py py-obj docutils literal"><span class="pre">wait</span></tt></a>()</td>
 <td>Wait and join the child process.</td>
 </tr>
 </tbody>
 </table>
 <dl class="method">
 <dt id="sharedmem.background.wait">
-<code class="descname">wait</code><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="_modules/sharedmem.html#background.wait"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#sharedmem.background.wait" title="Permalink to this definition">¶</a></dt>
+<tt class="descname">wait</tt><big>(</big><big>)</big><a class="reference internal" href="_modules/sharedmem.html#background.wait"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#sharedmem.background.wait" title="Permalink to this definition">¶</a></dt>
 <dd><p>Wait and join the child process. 
 The return value of the function call is returned.
 If any exception occurred it is wrapped and raised.</p>
@@ -265,8 +296,8 @@ If any exception occurred it is wrapped and raised.</p>
 
 <dl class="class">
 <dt id="sharedmem.MapReduce">
-<em class="property">class </em><code class="descclassname">sharedmem.</code><code class="descname">MapReduce</code><span class="sig-paren">(</span><em>backend=&lt;class sharedmem.ProcessBackend&gt;</em>, <em>np=None</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/sharedmem.html#MapReduce"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#sharedmem.MapReduce" title="Permalink to this definition">¶</a></dt>
-<dd><p>Bases: <code class="xref py py-class docutils literal"><span class="pre">object</span></code></p>
+<em class="property">class </em><tt class="descclassname">sharedmem.</tt><tt class="descname">MapReduce</tt><big>(</big><em>backend=&lt;class sharedmem.ProcessBackend at 0x7f9b60b20738&gt;</em>, <em>np=None</em><big>)</big><a class="reference internal" href="_modules/sharedmem.html#MapReduce"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#sharedmem.MapReduce" title="Permalink to this definition">¶</a></dt>
+<dd><p>Bases: <tt class="xref py py-class docutils literal"><span class="pre">object</span></tt></p>
 <p>A pool of slave processes for a Map-Reduce operation</p>
 <table class="docutils field-list" frame="void" rules="none">
 <col class="field-name" />
@@ -288,7 +319,7 @@ are performed on the master process &#8211; no child processes are created.</p>
 </tbody>
 </table>
 <p class="rubric">Notes</p>
-<p>Always wrap the call to <a class="reference internal" href="#sharedmem.MapReduce.map" title="sharedmem.MapReduce.map"><code class="xref py py-meth docutils literal"><span class="pre">map()</span></code></a> in a context manager (&#8216;with&#8217;) block.</p>
+<p>Always wrap the call to <a class="reference internal" href="#sharedmem.MapReduce.map" title="sharedmem.MapReduce.map"><tt class="xref py py-meth docutils literal"><span class="pre">map()</span></tt></a> in a context manager (&#8216;with&#8217;) block.</p>
 <p class="rubric">Methods</p>
 <table border="1" class="longtable docutils">
 <colgroup>
@@ -296,14 +327,14 @@ are performed on the master process &#8211; no child processes are created.</p>
 <col width="90%" />
 </colgroup>
 <tbody valign="top">
-<tr class="row-odd"><td><a class="reference internal" href="#sharedmem.MapReduce.map" title="sharedmem.MapReduce.map"><code class="xref py py-obj docutils literal"><span class="pre">map</span></code></a>(func,&nbsp;sequence[,&nbsp;reduce,&nbsp;star])</td>
+<tr class="row-odd"><td><a class="reference internal" href="#sharedmem.MapReduce.map" title="sharedmem.MapReduce.map"><tt class="xref py py-obj docutils literal"><span class="pre">map</span></tt></a>(func,&nbsp;sequence[,&nbsp;reduce,&nbsp;star])</td>
 <td>Map-reduce with multile processes.</td>
 </tr>
 </tbody>
 </table>
 <dl class="method">
 <dt id="sharedmem.MapReduce.map">
-<code class="descname">map</code><span class="sig-paren">(</span><em>func</em>, <em>sequence</em>, <em>reduce=None</em>, <em>star=False</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/sharedmem.html#MapReduce.map"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#sharedmem.MapReduce.map" title="Permalink to this definition">¶</a></dt>
+<tt class="descname">map</tt><big>(</big><em>func</em>, <em>sequence</em>, <em>reduce=None</em>, <em>star=False</em><big>)</big><a class="reference internal" href="_modules/sharedmem.html#MapReduce.map"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#sharedmem.MapReduce.map" title="Permalink to this definition">¶</a></dt>
 <dd><p>Map-reduce with multile processes.</p>
 <p>Apply func to each item on the sequence, in parallel. 
 As the results are collected, reduce is called on the result.
@@ -320,7 +351,7 @@ arguments as the length of an item in the sequence.</p>
 <p class="first admonition-title">Warning</p>
 <p class="last">func is not supposed to use exceptions for flow control.
 In non-debug mode all exceptions will be wrapped into
-a <a class="reference internal" href="#sharedmem.SlaveException" title="sharedmem.SlaveException"><code class="xref py py-class docutils literal"><span class="pre">SlaveException</span></code></a>.</p>
+a <a class="reference internal" href="#sharedmem.SlaveException" title="sharedmem.SlaveException"><tt class="xref py py-class docutils literal"><span class="pre">SlaveException</span></tt></a>.</p>
 </div>
 </div></blockquote>
 <p><strong>sequence</strong> : list or array_like</p>
@@ -350,7 +381,7 @@ the order of the arguments of sequence.</p>
 <tr class="field-odd field"><th class="field-name">Raises:</th><td class="field-body"><p class="first"><strong>SlaveException</strong></p>
 <blockquote class="last">
 <div><p>If any of the slave process encounters
-an exception. Inspect <code class="xref py py-attr docutils literal"><span class="pre">SlaveException.reason</span></code> for the underlying exception.</p>
+an exception. Inspect <tt class="xref py py-attr docutils literal"><span class="pre">SlaveException.reason</span></tt> for the underlying exception.</p>
 </div></blockquote>
 </td>
 </tr>
@@ -362,30 +393,42 @@ an exception. Inspect <code class="xref py py-attr docutils literal"><span class
 
 <dl class="function">
 <dt id="sharedmem.MapReduceByThread">
-<code class="descclassname">sharedmem.</code><code class="descname">MapReduceByThread</code><span class="sig-paren">(</span><em>np=None</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/sharedmem.html#MapReduceByThread"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#sharedmem.MapReduceByThread" title="Permalink to this definition">¶</a></dt>
+<tt class="descclassname">sharedmem.</tt><tt class="descname">MapReduceByThread</tt><big>(</big><em>np=None</em><big>)</big><a class="reference internal" href="_modules/sharedmem.html#MapReduceByThread"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#sharedmem.MapReduceByThread" title="Permalink to this definition">¶</a></dt>
 <dd><p>Creates a MapReduce object but with the Thread backend.</p>
 <p>The process backend is usually preferred.</p>
 </dd></dl>
 
 <dl class="function">
 <dt id="sharedmem.empty">
-<code class="descclassname">sharedmem.</code><code class="descname">empty</code><span class="sig-paren">(</span><em>shape</em>, <em>dtype='f8'</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/sharedmem.html#empty"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#sharedmem.empty" title="Permalink to this definition">¶</a></dt>
+<tt class="descclassname">sharedmem.</tt><tt class="descname">empty</tt><big>(</big><em>shape</em>, <em>dtype='f8'</em><big>)</big><a class="reference internal" href="_modules/sharedmem.html#empty"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#sharedmem.empty" title="Permalink to this definition">¶</a></dt>
 <dd><p>Create an empty shared memory array.</p>
 </dd></dl>
 
 <dl class="function">
 <dt id="sharedmem.empty_like">
-<code class="descclassname">sharedmem.</code><code class="descname">empty_like</code><span class="sig-paren">(</span><em>array</em>, <em>dtype=None</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/sharedmem.html#empty_like"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#sharedmem.empty_like" title="Permalink to this definition">¶</a></dt>
+<tt class="descclassname">sharedmem.</tt><tt class="descname">empty_like</tt><big>(</big><em>array</em>, <em>dtype=None</em><big>)</big><a class="reference internal" href="_modules/sharedmem.html#empty_like"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#sharedmem.empty_like" title="Permalink to this definition">¶</a></dt>
 <dd><p>Create a shared memory array from the shape of array.</p>
 </dd></dl>
 
 <dl class="function">
+<dt id="sharedmem.full">
+<tt class="descclassname">sharedmem.</tt><tt class="descname">full</tt><big>(</big><em>shape</em>, <em>value</em>, <em>dtype='f8'</em><big>)</big><a class="reference internal" href="_modules/sharedmem.html#full"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#sharedmem.full" title="Permalink to this definition">¶</a></dt>
+<dd><p>Create a shared memory array of given shape and type, filled with <cite>value</cite>.</p>
+</dd></dl>
+
+<dl class="function">
+<dt id="sharedmem.full_like">
+<tt class="descclassname">sharedmem.</tt><tt class="descname">full_like</tt><big>(</big><em>array</em>, <em>value</em>, <em>dtype=None</em><big>)</big><a class="reference internal" href="_modules/sharedmem.html#full_like"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#sharedmem.full_like" title="Permalink to this definition">¶</a></dt>
+<dd><p>Create a shared memory array with the same shape and type as a given array, filled with <cite>value</cite>.</p>
+</dd></dl>
+
+<dl class="function">
 <dt id="sharedmem.copy">
-<code class="descclassname">sharedmem.</code><code class="descname">copy</code><span class="sig-paren">(</span><em>a</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/sharedmem.html#copy"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#sharedmem.copy" title="Permalink to this definition">¶</a></dt>
+<tt class="descclassname">sharedmem.</tt><tt class="descname">copy</tt><big>(</big><em>a</em><big>)</big><a class="reference internal" href="_modules/sharedmem.html#copy"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#sharedmem.copy" title="Permalink to this definition">¶</a></dt>
 <dd><p>Copy an array to the shared memory.</p>
 <p class="rubric">Notes</p>
 <p>copy is not always necessary because the private memory is always copy-on-write.</p>
-<p>Use <code class="code docutils literal"><span class="pre">a</span> <span class="pre">=</span> <span class="pre">copy(a)</span></code> to immediately dereference the old &#8216;a&#8217; on private memory</p>
+<p>Use <tt class="code docutils literal"><span class="pre">a</span> <span class="pre">=</span> <span class="pre">copy(a)</span></tt> to immediately dereference the old &#8216;a&#8217; on private memory</p>
 </dd></dl>
 
 </div>
@@ -395,14 +438,13 @@ an exception. Inspect <code class="xref py py-attr docutils literal"><span class
           </div>
         </div>
       </div>
-      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+      <div class="sphinxsidebar">
         <div class="sphinxsidebarwrapper">
   <h3><a href="#">Table Of Contents</a></h3>
   <ul>
 <li><a class="reference internal" href="#">sharedmem package</a><ul>
 <li><a class="reference internal" href="#programming-model">Programming Model</a></li>
 <li><a class="reference internal" href="#usage">Usage</a></li>
-<li><a class="reference internal" href="#notes">Notes</a></li>
 <li><a class="reference internal" href="#examples">Examples</a></li>
 <li><a class="reference internal" href="#api-references">API References</a><ul>
 </ul>
@@ -411,14 +453,12 @@ an exception. Inspect <code class="xref py py-attr docutils literal"><span class
 </li>
 </ul>
 
-  <div role="note" aria-label="source link">
-    <h3>This Page</h3>
-    <ul class="this-page-menu">
-      <li><a href="_sources/index.txt"
-            rel="nofollow">Show Source</a></li>
-    </ul>
-   </div>
-<div id="searchbox" style="display: none" role="search">
+  <h3>This Page</h3>
+  <ul class="this-page-menu">
+    <li><a href="_sources/index.txt"
+           rel="nofollow">Show Source</a></li>
+  </ul>
+<div id="searchbox" style="display: none">
   <h3>Quick search</h3>
     <form class="search" action="search.html" method="get">
       <input type="text" name="q" />
@@ -435,7 +475,7 @@ an exception. Inspect <code class="xref py py-attr docutils literal"><span class
       </div>
       <div class="clearer"></div>
     </div>
-    <div class="related" role="navigation" aria-label="related navigation">
+    <div class="related">
       <h3>Navigation</h3>
       <ul>
         <li class="right" style="margin-right: 10px">
@@ -444,12 +484,12 @@ an exception. Inspect <code class="xref py py-attr docutils literal"><span class
         <li class="right" >
           <a href="py-modindex.html" title="Python Module Index"
              >modules</a> |</li>
-        <li class="nav-item nav-item-0"><a href="#">sharedmem 0.3 documentation</a> &raquo;</li> 
+        <li><a href="#">sharedmem 0.3 documentation</a> &raquo;</li> 
       </ul>
     </div>
-    <div class="footer" role="contentinfo">
+    <div class="footer">
         &copy; Copyright 2015, Yu Feng.
-      Created using <a href="http://sphinx-doc.org/">Sphinx</a> 1.3.1.
+      Created using <a href="http://sphinx-doc.org/">Sphinx</a> 1.2.3.
     </div>
   </body>
 </html>
