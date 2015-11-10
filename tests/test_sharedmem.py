@@ -18,6 +18,20 @@ def test_create():
     c = sharedmem.full_like(a, 1.0)
     assert c.shape == a.shape
 
+def test_scalar():
+    s = sharedmem.empty((), dtype='f8')
+    s[...] = 1.0
+    assert_equal(s, 1.0)
+
+    with sharedmem.MapReduce() as pool:
+        def work(i):
+            with pool.ordered:
+                s[...] = i
+        pool.map(work, range(10))
+
+    assert_equal(s, 9)
+
+
 def run_idle(pool):
     def work(i):
         time.sleep(0.4)
@@ -164,27 +178,27 @@ def test_warnings():
         pool.map(work, range(8))
 
 def test_critical():
-    t = sharedmem.empty(1, dtype='i8')
-    t[:] = 0
+    t = sharedmem.empty((), dtype='i8')
+    t[...] = 0
     # FIXME: if the system has one core then this will never fail,
     # even if the critical section is not 
     with sharedmem.MapReduce(np=8) as pool:
         def work(i):
             with pool.critical:
-                t[:] = 1
+                t[...] = 1
                 if i != 30:
                     time.sleep(0.01)
-                assert t[:] == 1
-                t[:] = 0
+                assert_equal(t, 1)
+                t[...] = 0
 
         pool.map(work, range(16))
 
         def work(i):
-            t[:] = 1
+            t[...] = 1
             if i != 30:
                 time.sleep(0.01)
-            assert t[:] == 1
-            t[:] = 0
+            assert_equal(t, 1)
+            t[...] = 0
 
         try:
             pool.map(work, range(16))
@@ -192,19 +206,6 @@ def test_critical():
             assert isinstance(e.reason, AssertionError)
             return 
     raise AssertionError("Shall not reach here.")
-
-def test_scalar():
-    s = sharedmem.empty((), dtype='f8')
-    s[...] = 1.0
-    assert_equal(s, 1.0)
-
-    with sharedmem.MapReduce() as pool:
-        def work(i):
-            with pool.ordered:
-                s[...] = i
-        pool.map(work, range(10))
-
-    assert_equal(s, 9)
 
 def test_sum():
     """ 
