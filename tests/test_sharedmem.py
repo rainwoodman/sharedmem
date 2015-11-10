@@ -156,6 +156,13 @@ def test_ordered():
         # without ordered, the ordering is messy
         assert not (t[1:] > t[:-1]).all()
 
+def test_warnings():
+    import warnings
+    with sharedmem.MapReduce(np=8) as pool:
+        def work(i):
+            warnings.warn("This shall not be printed")
+        pool.map(work, range(8))
+
 def test_critical():
     t = sharedmem.empty(1, dtype='i8')
     t[:] = 0

@@ -377,8 +377,14 @@ class ProcessGroup(object):
         # wrong pid in multiprocess.heap
         gc.collect()
 
-        for x in self.P:
-            x.start()
+        # disable warnings for subprocesses
+        # this may workaround some pyzmq deadlocks, but still needs to be tested.
+        # c.f. https://github.com/ipython/ipython/issues/6109 
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            for x in self.P:
+                x.start()
 
         # p is alive from the moment start returns.
         # thus we can join them immediately after start returns.
