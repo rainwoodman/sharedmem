@@ -11,16 +11,19 @@ Now also supports Python 3.
 - sharedmem.MapReduce dispatches work to child processes, allowing work functions
   defined in nested scopes.
 
-- sharedmem.MapReduce.ordered and sharedmem.MapReduce.critical provides
-  the equivlant concept of OpenMP ordered and OpenMP critical sections.
+- sharedmem.MapReduce.ordered and sharedmem.MapReduce.critical implements
+  the equivelant concepts as OpenMP ordered and OpenMP critical sections.
 
 - Exceptions are properly handled, including unpicklable exceptions. Unexpected death
   of child processes (Slaves) is handled in a graceful manner.
 
-Functions and variables are inherited from a `fork` and copy-on-write. 
-Pickability is not a concern. Usually limitations of `fork` applies. 
+Functions and variables are inherited from a :code:`fork` syscall and the copy-on-write
+mechanism, except sharedmem variables which are writable from both child processes or the
+main process.  Pickability of objects is not a concern. 
 
-Easier to use than multiprocessing.Pool, at the cost of not supporting Windows.
+Usual limitations of :code:`fork` do apply. 
+sharedmem.MapReduce is easier to use than multiprocessing.Pool, 
+at the cost of not supporting Windows.
 
 For documentation, please refer to http://rainwoodman.github.io/sharedmem .
 
