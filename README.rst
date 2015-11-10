@@ -66,3 +66,49 @@ For documentation, please refer to http://rainwoodman.github.io/sharedmem .
     assert_almost_equal(numpy.sum(r, dtype='f8'), shmsum)
     assert_almost_equal(numpy.sum(xdx, dtype='f8'), shmsum)
 
+.. code ::
+
+    """ 
+        An example word counting program. The parallelism is per line.
+
+        In reality, the parallelism shall be at least on a file level to
+        benefit from sharedmem / multiprocessing.
+        
+    """
+    word_count = {
+            'sharedmem': 0,
+            'pool': 0,
+            }
+
+    with sharedmem.MapReduce() as pool:
+
+        def work(line):
+            # create a fresh local counter dictionary
+            my_word_count = dict([(word, 0) for word in word_count])
+
+            for word in line.replace('.', ' ').split():
+                if word in word_count:
+                    my_word_count[word] += 1
+
+            return my_word_count
+
+        def reduce(her_word_count):
+            for word in word_count:
+                word_count[word] += her_word_count[word]
+
+        pool.map(work, file(__file__, 'r').readlines(), reduce=reduce)
+
+        parallel_result = dict(word_count)
+
+        # establish the ground truth from the sequential counter
+        sharedmem.set_debug(True)
+
+        for word in word_count:
+            word_count[word] = 0
+
+        pool.map(work, file(__file__, 'r').readlines(), reduce=reduce)
+        sharedmem.set_debug(False)
+
+    for word in word_count:
+        assert word_count[word] == parallel_result[word]
+
