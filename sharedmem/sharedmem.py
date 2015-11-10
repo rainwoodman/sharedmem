@@ -17,13 +17,16 @@
     - MapReduce allows the use of critical sections and ordered execution in the work
       function.
 
-    Modifications to shared Memory arrays, allocated via 
+    Shared memory segments can be accessed as numpy arrays, allocated via 
 
     - :py:meth:`sharedmem.empty`,
     - :py:meth:`sharedmem.empty_like`,
     - :py:meth:`sharedmem.copy`,
 
-    are visible by all processes, including the master process.
+    Shared memory segments are visible by the master process and slave 
+    processes in :py:class:`MapReduce`. Skillful usage of shared memory
+    segments can avoid Python pickling as a bottle neck in the scalibility of
+    your code.
 
     Usage
     -----
@@ -31,30 +34,31 @@
     Alternatively, the file :code:`sharedmem.py` can be directly embedded into 
     other projects.
 
-    The only external dependency is numpy, since this was designed to
-    work with large shared memory chunks through numpy.ndarray.
+    The only external dependency is numpy. sharedmem was designed to
+    work with large shared memory chunks via numpy.ndarray.
 
-    Environment variable OMP_NUM_THREADS is used to determine the
-    default number of slaves.
+    Environment variable :code:`OMP_NUM_THREADS` is used to determine the
+    default number of slaves. On PBS/Torque systems, :code:`PBS_NUM_PPN`
+    is used if `OMP_NUM_THREADS is not defined`
 
-    Notes
-    -----
-    This module depends on the `fork` system call, thus is available
-    only on posix systems (not Windows).
+    .. attention ::
+
+        This module depends on the `fork` system call, thus is available
+        only on posix systems (not Windows).
 
     Examples
     --------
 
-    Sum up a large array
+    Sum up a large array, printing the progress
 
     >>> input = numpy.arange(1024 * 1024 * 128, dtype='f8')
     >>> output = sharedmem.empty(1024 * 1024 * 128, dtype='f8')
-    >>> with MapReduce() as pool:
+    >>> with sharedmem.MapReduce() as pool:
     >>>    chunksize = 1024 * 1024
     >>>    def work(i):
     >>>        s = slice (i, i + chunksize)
     >>>        output[s] = input[s]
-    >>>        return i, sum(input[s])
+    >>>        return i, sum(input[s]) # we use the slower python sum operator
     >>>    def reduce(i, r):
     >>>        print('chunk', i, 'done')
     >>>        return r
@@ -62,36 +66,41 @@
     >>> print numpy.sum(r)
     >>>
 
-    Textual analysis
+    Count the total number of bacon and eggs in a directory.
 
-    >>> input = file('mytextfile.txt').readlines()
+    >>> files = glob.glob('mydata/*.txt')
     >>> word_count = {'bacon': 0, 'eggs': 0 }
-    >>> with MapReduce() as pool:
-    >>>    def work(line):
-    >>>        words = line.split()
-    >>>        for word in words:
-    >>>            word_count[word] += 1
-    >>>        return word_count
-    >>>    def reduce(wc):
+    >>> with sharedmem.MapReduce() as pool:
+    >>>    def work(filename):
+    >>>        f = file(filename, 'r').read()
+    >>>        wc = dict(word_count) # copy the word_count dict
+    >>>        for word in f.split():
+    >>>            if word in wc:
+    >>>                wc[word] += 1
+    >>>        return filename, wc
+    >>>    def reduce(filename, wc):
+    >>>        print (filename, 'done')
     >>>        for key in word_count:
     >>>            word_count[key] += wc[key]
+    >>>    pool.map(work, input, reduce=reduce)
     >>> print word_count
     >>>
 
     pool.ordered can be used to require a block of code to be executed in order
     
-    >>> with MapReduce() as pool:
+    >>> with sharedmem.MapReduce() as pool:
     >>>    def work(i):
     >>>         with pool.ordered:
-    >>>            print(i)
-    >>>    pool.map(work, range(10))
+    >>>            print('Hello World from rank', i, '/', pool.np)
+    >>>    pool.map(work, range(pool.np))
 
-    pool.critical can be used to require a block of code to be executed in a critical
-    section.
+    pool.critical can be used to protect a 
+    block of code, ensuring no two workers enter the code block at the
+    same time.
 
     >>> counter = sharedmem.empty(1)
     >>> counter[:] = 0
-    >>> with MapReduce() as pool:
+    >>> with sharedmem.MapReduce() as pool:
     >>>    def work(i):
     >>>         with pool.critical:
     >>>             counter[:] += i
@@ -148,23 +157,40 @@ __shmdebug__ = False
 def set_debug(flag):
     """ Set the debug mode.
 
-        In debug mode (flag==True), no slaves are spawn.
-        All work are done in serial on the master thread/process.
-        This eases debuggin when the worker throws out an exception. 
+        In debug mode (flag==True), the MapReduce pool will
+        run the work function on the master thread / process.
+        This ensures all exceptions can be properly inspected by 
+        a debugger, e.g. pdb.
+
+        Parameters
+        ----------
+        flag : boolean
+            True for debug mode, False for production mode.
+
+
     """
     global __shmdebug__
     __shmdebug__ = flag
 
 def get_debug():
-    """ Get the debug mode """    
+    """ Get the debug mode.
+        
+        Returns
+        -------
+        The debug mode. True if currently in debugging mode.
+
+    """    
     global __shmdebug__
     return __shmdebug__
 
 def total_memory():
     """ Returns the the amount of memory available for use.
 
-        This function is not very useful.
         The memory is obtained from MemTotal entry in /proc/meminfo.
+        
+        Notes
+        =====
+        This function is not very useful and not very portable. 
 
     """
     with file('/proc/meminfo', 'r') as f:
@@ -175,7 +201,7 @@ def total_memory():
     raise IOError('MemTotal unknown')
 
 def cpu_count():
-    """ Returns the number of slave processes to be spawned.
+    """ Returns the default number of slave processes to be spawned.
 
         The default value is the number of physical cpu cores seen by python.
         :code:`OMP_NUM_THREADS` environment variable overrides it.
@@ -196,7 +222,10 @@ def cpu_count():
         return int(num)
     except:
         return multiprocessing.cpu_count()
+
 class LostExceptionType(Warning):
+    """ Warning issued when a unpicklable exception occurs.
+    """
     pass
 
 class SlaveException(Exception):
@@ -224,7 +253,9 @@ class SlaveException(Exception):
         Exception.__init__(self, "%s\n%s" % (str(reason), str(traceback)))
 
 class StopProcessGroup(Exception):
-    """ StopProcessGroup will terminate the slave process/thread """
+    """ A special type of Exception. 
+        StopProcessGroup will terminate the slave process/thread 
+    """
     def __init__(self):
         Exception.__init__(self, "StopProcessGroup")
 
@@ -368,7 +399,8 @@ class ProcessGroup(object):
             raise an StopProcessGroup exception.
 
             A slave process will terminate upon StopProcessGroup.
-            The master process shall read the error
+            The master process shall read the error from the process group.
+
         """
         while self.Errors.empty():
             try:
