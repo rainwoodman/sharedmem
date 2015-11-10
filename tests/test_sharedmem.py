@@ -209,9 +209,9 @@ def test_sum():
 
     """
     xdx = sharedmem.empty(1024 * 1024 * 128, dtype='f8')
-    shmsum = sharedmem.empty(1, dtype='f8')
+    shmsum = sharedmem.empty((), dtype='f8')
 
-    shmsum[:] = 0.0
+    shmsum[...] = 0.0
 
     with sharedmem.MapReduce() as pool:
 
@@ -229,7 +229,7 @@ def test_sum():
             a = xdx[s].sum(dtype='f8')
 
             with pool.critical:
-                shmsum[:] += a
+                shmsum[...] += a
 
             return i, a
 
@@ -241,8 +241,8 @@ def test_sum():
 
         r = pool.map(work, range(0, len(xdx), chunksize), reduce=reduce)
 
-    assert_almost_equal(numpy.sum(r, dtype='f8'), shmsum[0])
-    assert_almost_equal(numpy.sum(xdx, dtype='f8'), shmsum[0])
+    assert_almost_equal(numpy.sum(r, dtype='f8'), shmsum)
+    assert_almost_equal(numpy.sum(xdx, dtype='f8'), shmsum)
 
 if __name__ == "__main__":
     import sys

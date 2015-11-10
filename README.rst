@@ -30,11 +30,10 @@ For documentation, please refer to http://rainwoodman.github.io/sharedmem .
         3. sum of partial sums from each process.
 
     """
-
     xdx = sharedmem.empty(1024 * 1024 * 128, dtype='f8')
-    shmsum = sharedmem.empty(1, dtype='f8')
+    shmsum = sharedmem.empty((), dtype='f8')
 
-    shmsum[:] = 0.0
+    shmsum[...] = 0.0
 
     with sharedmem.MapReduce() as pool:
 
@@ -52,7 +51,7 @@ For documentation, please refer to http://rainwoodman.github.io/sharedmem .
             a = xdx[s].sum(dtype='f8')
 
             with pool.critical:
-                shmsum[:] += a
+                shmsum[...] += a
 
             return i, a
 
@@ -64,7 +63,6 @@ For documentation, please refer to http://rainwoodman.github.io/sharedmem .
 
         r = pool.map(work, range(0, len(xdx), chunksize), reduce=reduce)
 
-    assert_almost_equal(numpy.sum(r, dtype='f8'), shmsum[0])
-    assert_almost_equal(numpy.sum(xdx, dtype='f8'), shmsum[0])
-   
+    assert_almost_equal(numpy.sum(r, dtype='f8'), shmsum)
+    assert_almost_equal(numpy.sum(xdx, dtype='f8'), shmsum)
 
