@@ -34,7 +34,7 @@ def test_scalar():
 
 def run_idle(pool):
     def work(i):
-        time.sleep(0.4)
+        time.sleep(2.0)
 
     with pool:
         now = time.time()
@@ -43,12 +43,12 @@ def run_idle(pool):
     return time.time() - now
 
 def test_parallel_process():
-    pool = sharedmem.MapReduce()
-    assert run_idle(pool) < 1.0
+    pool = sharedmem.MapReduce(np=4)
+    assert run_idle(pool) < 3.0
 
 def test_parallel_thread():
-    pool = sharedmem.MapReduceByThread() 
-    assert run_idle(pool) < 1.0
+    pool = sharedmem.MapReduceByThread(np=4) 
+    assert run_idle(pool) < 3.0
 
 from sharedmem import background
 
