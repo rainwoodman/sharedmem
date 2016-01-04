@@ -569,10 +569,29 @@ class MapReduce(object):
             the number of available cores on the computer. If np is 0, all operations
             are performed on the master process -- no child processes are created.
 
+        Attributes
+        ----------
+        np   : int
+            Number of processes to use. (`omp_get_num_threads()`)
+
+        local : object
+            A namespace object that contains variables local to the worker
+            thread / process. local is only accessible in the worker processes.
+
+        local.rank : int
+            The rank of the current worker. (`omp_get_thread_num()`)
+
         Notes
         -----
         Always wrap the call to :py:meth:`map` in a context manager ('with') block.
 
+        Examples
+        --------
+
+        >>> with sharedmem.MapReduce() as pool:
+        >>>     def work(i):
+        >>>         return i + pool.local.rank
+        >>>     pool.map(work, range(10))
     """
     def __init__(self, backend=ProcessBackend, np=None):
         self.backend = backend
