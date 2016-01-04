@@ -696,7 +696,13 @@ class MapReduce(object):
 
         if len(sequence) == 0 or self.np == 0 or get_debug():
             #Do this in serial
-            return [realreduce(realfunc(i)) for i in sequence]
+            self.local = lambda : None
+            self.local.rank = 0
+
+            rt = [realreduce(realfunc(i)) for i in sequence]
+
+            self.local = None
+            return rt
 
         Q = self.backend.QueueFactory(64)
         R = self.backend.QueueFactory(64)
