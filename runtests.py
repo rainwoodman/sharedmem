@@ -5,7 +5,7 @@ from numpy.testing import Tester
 sys.path.insert(0, os.path.abspath('sharedmem'))
 
 import sharedmem
-
+print(sharedmem)
 from sys import argv
 
 tester = Tester()

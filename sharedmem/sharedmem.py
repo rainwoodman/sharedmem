@@ -586,6 +586,7 @@ class MapReduce(object):
         # and terminate the process.
         # the exception is muted in ProcessGroup,
         # as it will only be dispatched from master.
+        self.local = pg._tls
         while True:
             capsule = pg.get(Q)
             if capsule is None:
@@ -598,14 +599,17 @@ class MapReduce(object):
             self.ordered.move(i)
             r = realfunc(work)
             pg.put(R, (i, r))
+        self.local = None
 
     def __enter__(self):
         self.critical = self.backend.LockFactory()
         self.ordered = Ordered(self.backend)
+        self.local = None # will be set during _main
         return self
 
     def __exit__(self, *args):
         self.ordered = None
+        self.local = None
         pass
 
     def map(self, func, sequence, reduce=None, star=False):
@@ -664,7 +668,7 @@ class MapReduce(object):
             if star: return func(*i)
             else: return func(i)
 
-        if self.np == 0 or get_debug():
+        if len(sequence) == 0 or self.np == 0 or get_debug():
             #Do this in serial
             return [realreduce(realfunc(i)) for i in sequence]
 

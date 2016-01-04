@@ -151,6 +151,16 @@ def test_memory_type():
     assert not isinstance(a + b, type(a))
     assert not isinstance(a * b, type(a))
 
+def test_local():
+    t = sharedmem.empty(800)
+    with sharedmem.MapReduce(np=4) as pool:
+        def work(i):
+            time.sleep(0.1 * numpy.random.uniform())
+            with pool.ordered:
+                t[i] = pool.local.rank
+        pool.map(work, range(800))
+    assert_equal(numpy.unique(t), range(4))
+
 def test_ordered():
     t = sharedmem.empty(800)
     with sharedmem.MapReduce(np=32) as pool:
