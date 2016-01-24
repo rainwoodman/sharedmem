@@ -638,7 +638,7 @@ class MapReduce(object):
         self.local = None
         pass
 
-    def map(self, func, sequence, reduce=None, star=False):
+    def map(self, func, sequence, reduce=None, star=False, minlength=0):
         """ Map-reduce with multile processes.
 
             Apply func to each item on the sequence, in parallel. 
@@ -669,6 +669,12 @@ class MapReduce(object):
                 if True, the items in sequence are treated as positional
                 arguments of reduce.
 
+            minlength: integer
+                Minimal length of `sequence` to start parallel processing.
+                if len(sequence) < minlength, fall back to sequential
+                processing. This can be used to avoid the overhead of starting
+                the worker processes when there is little work.
+                
             Returns
             -------
             results : list
@@ -694,8 +700,8 @@ class MapReduce(object):
             if star: return func(*i)
             else: return func(i)
 
-        if len(sequence) == 0 or self.np == 0 or get_debug():
-            #Do this in serial
+        if len(sequence) <= 0 or self.np == 0 or get_debug():
+            # Do this in serial
             self.local = lambda : None
             self.local.rank = 0
 
@@ -704,11 +710,14 @@ class MapReduce(object):
             self.local = None
             return rt
 
+        # never use more than len(sequence) processes
+        np = min([self.np, len(sequence)])
+
         Q = self.backend.QueueFactory(64)
         R = self.backend.QueueFactory(64)
         self.ordered.reset()
 
-        pg = ProcessGroup(main=self._main, np=self.np,
+        pg = ProcessGroup(main=self._main, np=np,
                 backend=self.backend,
                 args=(Q, R, sequence, realfunc))
 
@@ -728,7 +737,7 @@ class MapReduce(object):
                     j = j + 1
                 N.append(j)
 
-                for i in range(self.np):
+                for i in range(np):
                     pg.put(Q, None)
             except StopProcessGroup:
                 return
