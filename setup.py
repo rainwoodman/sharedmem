@@ -1,6 +1,6 @@
 from numpy.distutils.core import setup, Extension
 from numpy import get_include
-setup(name="sharedmem", version="0.3.2",
+setup(name="sharedmem", version="0.3.3",
       author="Yu Feng",
       author_email="rainwoodman@gmail.com",
       description="Dispatch your trivially parallizable jobs with sharedmem. ",
