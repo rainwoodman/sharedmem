@@ -29,7 +29,7 @@ For documentation, please refer to http://rainwoodman.github.io/sharedmem .
 
 Here we provide two simple examples to illustrate the usage:
 
-.. code ::
+.. code-block :: python
 
     """ 
         Integrate [0, ... 1.0) with rectangle rule. 
@@ -75,7 +75,7 @@ Here we provide two simple examples to illustrate the usage:
     assert_almost_equal(numpy.sum(r, dtype='f8'), shmsum)
     assert_almost_equal(numpy.sum(xdx, dtype='f8'), shmsum)
 
-.. code ::
+.. code-block :: python
 
     """ 
         An example word counting program. The parallelism is per line.
