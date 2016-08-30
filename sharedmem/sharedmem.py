@@ -396,7 +396,9 @@ class ProcessGroup(object):
         self.guard.start()
 
     def get_exception(self):
-        exp = self.Errors.get(timeout=0)
+        # give it a bit of slack in case the error is not yet posted.
+        # XXX: why does this happen?
+        exp = self.Errors.get(timeout=1)
         return SlaveException(*exp)
 
     def get(self, Q):
