@@ -1,5 +1,5 @@
 from setuptools import setup
-setup(name="sharedmem", version="0.3.4",
+setup(name="sharedmem", version="0.3.5",
       author="Yu Feng",
       author_email="rainwoodman@gmail.com",
       description="Dispatch your trivially parallizable jobs with sharedmem. ",
