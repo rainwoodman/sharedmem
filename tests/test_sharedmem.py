@@ -291,7 +291,7 @@ def test_wordcount():
             for word in word_count:
                 word_count[word] += her_word_count[word]
 
-        pool.map(work, file(__file__, 'r').readlines(), reduce=reduce)
+        pool.map(work, open(__file__, 'r').readlines(), reduce=reduce)
 
         parallel_result = dict(word_count)
 
@@ -301,7 +301,7 @@ def test_wordcount():
         for word in word_count:
             word_count[word] = 0
 
-        pool.map(work, file(__file__, 'r').readlines(), reduce=reduce)
+        pool.map(work, open(__file__, 'r').readlines(), reduce=reduce)
         sharedmem.set_debug(False)
 
     for word in word_count:
