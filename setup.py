@@ -9,7 +9,7 @@ setup(name="sharedmem", version="0.3.5",
       packages = [
         'sharedmem'
       ],
-      requires=['numpy'],
+      license="GPLv3",
       install_requires=['numpy'],
 )
 
