@@ -809,6 +809,13 @@ def full(shape, value, dtype='f8'):
     shared[:] = value
     return shared
 
+def asarray(array, dtype=None):
+    """ Create a shared memory array as a copy of given array.
+    """
+    shared = empty_like(array, dtype)
+    shared[:] = array[:]
+    return shared
+
 def copy(a):
     """ Copy an array to the shared memory. 
 
