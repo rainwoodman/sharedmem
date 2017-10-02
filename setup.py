@@ -7,7 +7,7 @@ setup(name="sharedmem", version="0.3.5",
       zip_safe=False,
       package_dir = {'sharedmem': 'sharedmem'},
       packages = [
-        'sharedmem'
+        'sharedmem', 'sharedmem.tests'
       ],
       license="GPLv3",
       install_requires=['numpy'],
