@@ -16,7 +16,7 @@ before_install:
 install:
     - conda create --yes -n test python=$PYTHON_VERSION
     - source activate test
-    - conda install --yes numpy=$NUMPY_VERSION nose runtests
+    - conda install --yes -c bccp numpy=$NUMPY_VERSION nose runtests
     - python setup.py install
 
 script:
