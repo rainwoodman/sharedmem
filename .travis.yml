@@ -7,7 +7,7 @@ python:
     - 3.6
 
 env:
-    - NUMPY_VERSION=1.10 OMP_NUM_THREADS=2
+    - NUMPY_VERSION=1.13 OMP_NUM_THREADS=2
 
 before_install:
     - wget http://repo.continuum.io/miniconda/Miniconda-latest-Linux-x86_64.sh -O miniconda.sh
