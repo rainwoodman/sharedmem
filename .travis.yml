@@ -20,7 +20,7 @@ install:
     - python setup.py install
 
 script:
-    - python ./runtests.py
+    - python run-tests.py
 
 deploy:
     - provider : pypi
