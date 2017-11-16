@@ -4,6 +4,11 @@ Dispatch your trivially parallizable jobs with sharedmem.
     :alt: Build Status
     :target: https://travis-ci.org/rainwoodman/sharedmem/
 
+To cite sharedmem use the DOI below
+
+.. image:: https://zenodo.org/badge/4997909.svg
+   :target: https://zenodo.org/badge/latestdoi/4997909
+   
 Now also supports Python 3.
 
 - sharedmem.empty creates numpy arrays shared by child processes.
