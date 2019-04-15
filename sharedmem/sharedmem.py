@@ -827,7 +827,7 @@ def fromiter(iter, dtype, count=None):
 
 def __unpickle__(ai, dtype):
     dtype = numpy.dtype(dtype)
-    tp = numpy.ctypeslib._typecodes['|u1']
+    tp = numpy.ctypeslib.as_ctypes_type(numpy.dtype('|u1'))
 
     # if there are strides, use strides, otherwise the stride is the itemsize of dtype
     if ai['strides']:
