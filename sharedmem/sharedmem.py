@@ -825,9 +825,16 @@ def copy(a):
 def fromiter(iter, dtype, count=None):
     return copy(numpy.fromiter(iter, dtype, count))
 
+try:
+    # numpy >= 1.16
+    _unpickle_ctypes_type = numpy.ctypeslib.as_ctypes_type(numpy.dtype('|u1'))
+except:
+    # older version numpy < 1.16
+    _unpickle_ctypes_type = numpy.ctypeslib._typecodes['|u1']
+
 def __unpickle__(ai, dtype):
     dtype = numpy.dtype(dtype)
-    tp = numpy.ctypeslib._typecodes['|u1']
+    tp = _unpickle_ctypes_type * 1
 
     # if there are strides, use strides, otherwise the stride is the itemsize of dtype
     if ai['strides']:
