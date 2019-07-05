@@ -126,3 +126,30 @@ Here we provide two simple examples to illustrate the usage:
     for word in word_count:
         assert word_count[word] == parallel_result[word]
 
+
+Segfault when work function returns raw pointers
+------------------------------------------------
+
+Although the global variables are delivered via copy-on-write fork,
+sharedmem relies on python's pickle module to send and recieve the
+return value of 'work' functions.
+
+As a consequence, if the underlying library used by the work function
+returns objects that are not pickle friendly,
+then we will receive a corrupted object on the master process.
+
+
+This can happen,
+for example if the underlyihng library returns an object that stores a raw
+pointer as an attribute. After unpickling the result on a new process, the raw
+pointer will point to an undefined memory region, and the master process will
+segfault as a result.
+
+It is not as exotic as it sounds. We ran into this issue when interfacing sharedmem with
+cosmosis, which stores a raw pointer as an attribute:
+
+https://bitbucket.org/joezuntz/cosmosis/src/2a9d3197852f900555ee9c72784604f4a1773ee1/cosmosis/datablock/cosmosis_py/block.py#lines-78
+
+The solution is to unpack the result of the work function, down to low level objects that are pickle
+friendly, and return those instead of the unfriendly high level object.
+
