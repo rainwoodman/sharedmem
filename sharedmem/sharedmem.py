@@ -266,23 +266,24 @@ class ProcessGroup(object):
         self._tls = backend.StorageFactory()
         self.main = main
         self.args = args
-        self.guard = threading.Thread(target=self._guardMain)
+        self.slaveguard = threading.Thread(target=self._slaveGuard)
         self.errorguard = threading.Thread(target=self._errorGuard)
-        # this has to be from backend because the slaves will check
-        # this variable.
-
-        self.guardDead = backend.EventFactory()
+        # _allDead has to be from backend because the slaves will check
+        # this variable via is_alive()
+        self._allDead = backend.EventFactory()
         # each dead child releases one sempahore
-        # when all dead guard will proceed to set guarddead
+        # when all children are dead, will set _allDead event.
         self.semaphore = threading.Semaphore(0)
         self.JoinedProcesses = multiprocessing.RawValue('l')
+        # workers
         self.P = [
             backend.SlaveFactory(target=self._slaveMain,
                 args=(rank,)) \
                 for rank in range(np)
             ]
-        self.G = [
-            threading.Thread(target=self._slaveGuard,
+        # nanny threads
+        self.N = [
+            threading.Thread(target=self._slaveNanny,
                 args=(rank, self.P[rank])) \
                 for rank in range(np)
             ]
@@ -307,14 +308,12 @@ class ProcessGroup(object):
                     pickle.dumps(e)
                 except Exception as ee:
                     e = str(e)
-                 
+
                 tb = traceback.format_exc()
                 self.Errors.put((e, tb), timeout=0)
             except queue.Full:
                 pass
         finally:
-#            self.Errors.close()
-#            self.Errors.join_thread()
             # making all slaves exit one after another
             # on some Linuxes if many slaves (56+) access
             # mmap randomly the termination of the slaves
@@ -327,8 +326,11 @@ class ProcessGroup(object):
         for p in self.P:
             if not p.is_alive(): continue
             try:
-                if isinstance(p, threading.Thread): p.join()
-                else: os.kill(p._popen.pid, 5)
+                if isinstance(p, threading.Thread):
+                    # will die on next self.get() / self.put()
+                    p.join()
+                else:
+                    os.kill(p._popen.pid, 5)
             except Exception as e:
                 print(e)
                 continue
@@ -337,15 +339,15 @@ class ProcessGroup(object):
         # this guard will kill every child if
         # an error is observed. We watch for this every 0.5 seconds
         # (errors do not happen very often)
-        # if guardDead is set or killall is emitted, this will end immediately.
-        while not self.guardDead.is_set():
+        # if _allDead is set or killall is emitted, this will end immediately.
+        while self.is_alive():
             if not self.Errors.empty():
                 self.killall()
                 break
             # for python 2.6.x wait returns None XXX
-            self.guardDead.wait(timeout=0.5)
+            self._allDead.wait(timeout=0.5)
 
-    def _slaveGuard(self, rank, process):
+    def _slaveNanny(self, rank, process):
         process.join()
         if isinstance(process, threading.Thread):
             pass
@@ -359,18 +361,18 @@ class ProcessGroup(object):
                     pass
         self.semaphore.release() 
 
-    def _guardMain(self):
+    def _slaveGuard(self):
         # this guard will wait till all children are dead.
-        # we then set the guardDead event
-        for x in self.G:
+        for x in self.N:
             self.semaphore.acquire()
             self.JoinedProcesses.value = self.JoinedProcesses.value + 1
 
-        self.guardDead.set()
+        # we then notify the _allDead event
+        self._allDead.set()
 
     def start(self):
         self.JoinedProcesses.value = 0
-        self.guardDead.clear()
+        self._allDead.clear()
 
         # collect the garbages before forking so that the left-over
         # junk won't throw out assertion errors due to
@@ -390,10 +392,10 @@ class ProcessGroup(object):
         # thus we can join them immediately after start returns.
         # guardMain will check if the slave has been
         # killed by the os, and simulate an error if so.
-        for x in self.G:
+        for x in self.N:
             x.start()
         self.errorguard.start()
-        self.guard.start()
+        self.slaveguard.start()
 
     def get_exception(self):
         # give it a bit of slack in case the error is not yet posted.
@@ -442,15 +444,15 @@ class ProcessGroup(object):
             raise StopProcessGroup
 
     def is_alive(self):
-        return not self.guardDead.is_set()
+        return not self._allDead.is_set()
 
     def join(self):
-        self.guardDead.wait()
-        for x in self.G:
+        self._allDead.wait()
+        for x in self.N:
             x.join()
 
         self.errorguard.join()
-        self.guard.join()
+        self.slaveguard.join()
         if not self.Errors.empty():
             raise SlaveException(*self.Errors.get())
 
@@ -746,7 +748,7 @@ class MapReduce(object):
             finally:
                 pass
         feeder = threading.Thread(None, feeder, args=(pg, Q, N))
-        feeder.start() 
+        feeder.start()
 
         # we run fetcher on main thread to catch exceptions
         # raised by reduce 
