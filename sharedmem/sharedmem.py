@@ -617,18 +617,25 @@ class MapReduce(object):
         # the exception is muted in ProcessGroup,
         # as it will only be dispatched from master.
         self.local = pg._tls
-        while True:
-            capsule = pg.get(Q)
-            if capsule is None:
-                return
-            if len(capsule) == 1:
-                i, = capsule
-                work = sequence[i]
-            else:
-                i, work = capsule
-            self.ordered.move(i)
-            r = realfunc(work)
-            pg.put(R, (i, r))
+        try:
+            while True:
+                capsule = pg.get(Q)
+                if capsule is None:
+                    return
+                if len(capsule) == 1:
+                    i, = capsule
+                    work = sequence[i]
+                else:
+                    i, work = capsule
+                self.ordered.move(i)
+                r = realfunc(work)
+                pg.put(R, (i, r))
+        except BaseException as e:
+            if self.backend is ProcessBackend:
+                # terminate the join threads of Queues to avoid deadlocks
+                Q.cancel_join_thread()
+                R.cancel_join_thread()
+            raise
         self.local = None
 
     def __enter__(self):
@@ -778,10 +785,14 @@ class MapReduce(object):
             assert N[0] == len(rt)
             return rt
         except BaseException as e:
+            if self.backend is ProcessBackend:
+                # terminate the join threads of Queues to avoid deadlocks.
+                Q.cancel_join_thread()
+                R.cancel_join_thread()
             pg.killall()
             pg.join()
             feeder.join()
-            raise 
+            raise
 
 
 def empty_like(array, dtype=None):
