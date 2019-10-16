@@ -32,3 +32,6 @@ deploy:
       on:
         tags : true
         condition : ${TRAVIS_JOB_NUMBER##*.} == 1
+      # workaround for https://github.com/travis-ci/travis-ci/issues/9303
+      edge:
+        branch: v1.8.45
