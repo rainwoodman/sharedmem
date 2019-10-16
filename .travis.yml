@@ -1,18 +1,19 @@
 language: c
 
 env:
+    - PYTHON_VERSION=3.7 NUMPY_VERSION=1.16 OMP_NUM_THREADS=2
     - PYTHON_VERSION=2.7 NUMPY_VERSION=1.13 OMP_NUM_THREADS=2
     - PYTHON_VERSION=3.5 NUMPY_VERSION=1.13 OMP_NUM_THREADS=2
     - PYTHON_VERSION=3.6 NUMPY_VERSION=1.13 OMP_NUM_THREADS=2
     - PYTHON_VERSION=3.6 NUMPY_VERSION=1.16 OMP_NUM_THREADS=2
-    - PYTHON_VERSION=3.7 NUMPY_VERSION=1.16 OMP_NUM_THREADS=2
 
 before_install:
     - wget http://repo.continuum.io/miniconda/Miniconda-latest-Linux-x86_64.sh -O miniconda.sh
     - chmod +x miniconda.sh
     - ./miniconda.sh -b -p $HOME/miniconda
     - export PATH=$HOME/miniconda/bin:$PATH
-    - conda update --yes conda
+    # Workaround for transient conda update issue.
+    #- conda update --yes conda
 
 install:
     - conda create --yes -n test python=$PYTHON_VERSION
