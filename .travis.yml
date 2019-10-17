@@ -12,8 +12,7 @@ before_install:
     - chmod +x miniconda.sh
     - ./miniconda.sh -b -p $HOME/miniconda
     - export PATH=$HOME/miniconda/bin:$PATH
-    # Workaround for transient conda update issue.
-    #- conda update --yes conda
+    - conda update --yes conda
 
 install:
     - conda create --yes -n test python=$PYTHON_VERSION
@@ -23,6 +22,9 @@ install:
 
 script:
     - python run-tests.py
+
+before_deploy:
+    - source deactivate
 
 deploy:
     - provider : pypi
@@ -34,5 +36,5 @@ deploy:
         tags : true
         condition : ${TRAVIS_JOB_NUMBER##*.} == 1
       # workaround for https://github.com/travis-ci/travis-ci/issues/9303
-      edge:
-        branch: v1.8.45
+#      edge:
+#        branch: v1.8.45
