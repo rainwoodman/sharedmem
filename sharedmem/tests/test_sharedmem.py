@@ -87,7 +87,7 @@ def test_killed():
                os.kill(os.getpid(), signal.SIGKILL)
         try:
             pool.map(work, range(100))
-        except sharedmem.SlaveException:
+        except sharedmem.WorkerException:
             return
 
     raise AssertionError("Shall not reach here")
@@ -124,7 +124,7 @@ def test_picklable_raise():
                 raise PicklableException("Raise an exception")
         try:
             pool.map(work, range(100))
-        except sharedmem.SlaveException as e:
+        except sharedmem.WorkerException as e:
             assert isinstance(e.reason, PicklableException)
             return
     raise AssertionError("Shall not reach here")
@@ -212,7 +212,7 @@ def test_critical():
 
         try:
             pool.map(work, range(16))
-        except sharedmem.SlaveException as e:
+        except sharedmem.WorkerException as e:
             assert isinstance(e.reason, AssertionError)
             return 
     raise AssertionError("Shall not reach here.")

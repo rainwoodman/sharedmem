@@ -31,7 +31,7 @@
 
         Biggest bunch I have fixed are because we rely on
         an asynchronized Exception(AE) to jump out of a parallel scope
-        when there are exceptions from slave processes.
+        when there are exceptions from worker processes.
         In Python AE is unsafe, even with the new 'with' statement. 
 
         As a fix, we limit the AE only between __enter__ and __exit__,
@@ -90,17 +90,17 @@ from . import sharedmem
 __all__ = ['Parallel', 'ParallelException']
 
 class ParallelException(Exception):
-    """When a Slave process is unexpectedly killed (by the OS, eg, OOM)"""
+    """When a Worker process is unexpectedly killed (by the OS, eg, OOM)"""
     pass
 
 class LongJump(BaseException):
     """Convert SIGTRAP to an python exception so that the
        parallel section will jump to __exit__.
 
-       We use SIGTRAP to notify the master and slave that an exception
+       We use SIGTRAP to notify the master and worker that an exception
        has occured. 
 
-       A slave process that received SIGTRAP will exit immediately.
+       A worker process that received SIGTRAP will exit immediately.
        (We rely on the OS for that)
 
        LongJump is called by errormon upon detection of an error.
@@ -111,7 +111,7 @@ class LongJump(BaseException):
 
        To ensure master jumps to __exit__ we make sure the code runs
        to the next bytecode asap by 
-       We forcefully release all Semaphores, after ensuring all slaves
+       We forcefully release all Semaphores, after ensuring all workers
        are killed.
     """
     muted = False
@@ -136,8 +136,8 @@ class LongJump(BaseException):
             signal.signal(signal.SIGTRAP, signal.SIG_IGN)
     @staticmethod
     def longjump():
-        LongJump.parallel._slavemon.kill_all()
-        # first kill slaves, then master
+        LongJump.parallel._workermon.kill_all()
+        # first kill workers, then master
         os.kill(os.getpid(), signal.SIGTRAP)
 
         # this line will always run becuase
@@ -145,12 +145,12 @@ class LongJump(BaseException):
         # signal is trapped on main-thread.
         # will will ensure all Semaphores are released
         # so that the master won't stuck
-        # as all slaves are dead, we just need to
+        # as all workers are dead, we just need to
         # increase the semaphores enough to raise the master
         LongJump.parallel._cleanup()
 
 
-class SlaveMonitor:
+class WorkerMonitor:
     def __init__(self, errormon):
         self.children = []
         self.errormon = errormon
@@ -163,13 +163,13 @@ class SlaveMonitor:
             n = n + 1
             self.children.remove(pid)
             if status != 0 and status != signal.SIGTRAP:
-                self.errormon.slaveraise(ParallelException, 
-                        ParallelException("slave %d died unexpected: %d" % (pid,
+                self.errormon.workerraise(ParallelException, 
+                        ParallelException("worker %d died unexpected: %d" % (pid,
                             status)), None)
     def notechild(self, pid):
         self.children.append(pid)
     def kill_all(self):
-        """kill all slaves and reap the monitor """
+        """kill all workers and reap the monitor """
         for pid in self.children:
             try:
                 os.kill(pid, signal.SIGTRAP)
@@ -225,8 +225,8 @@ class ErrorMonitor:
         finally:
             self.thread = None
 
-    def slaveraise(self, type, error, traceback):
-        """ slave only """
+    def workerraise(self, type, error, traceback):
+        """ worker only """
         message = 'E' * 1 + pickle.dumps((type,
             ''.join(tb.format_exception(type, error, traceback))))
         if self.pipe is not None:
@@ -261,7 +261,7 @@ class Parallel(object):
             if not self.master: continue
             pid = os.fork()
             if pid != 0:
-                self._slavemon.notechild(pid)
+                self._workermon.notechild(pid)
             else:
                 self.rank = i + 1
                 self.master = False
@@ -276,7 +276,7 @@ class Parallel(object):
     def __enter__(self):
         self.critical = Semaphore(1)
         self._errormon = ErrorMonitor() 
-        self._slavemon = SlaveMonitor(self._errormon) 
+        self._workermon = WorkerMonitor(self._errormon) 
         shared = sharedmem.empty((),
                 dtype=[
                     ('ordered', 'intp'),
@@ -296,16 +296,16 @@ class Parallel(object):
             param.afterfork(self)
         if self.master:
             self._errormon.start()
-            self._slavemon.start()
+            self._workermon.start()
             LongJump.listen(self)
         return self
 
     def __exitmaster__(self, type, exception, traceback):
         if type is None:
-            # if any slaves raise error
+            # if any workers raise error
             # _erromon will kill them
             # but master won't receive the LongJump signal
-            self._slavemon.join()
+            self._workermon.join()
             self._errormon.join()
             if self._errormon.message is not None:
                 type, msg = pickle.loads(self._errormon.message)
@@ -315,7 +315,7 @@ class Parallel(object):
             type, msg = pickle.loads(self._errormon.message)
             raise type(msg)
         else:
-            self._slavemon.kill_all()
+            self._workermon.kill_all()
             self._errormon.join()
 
         for param in self._variables:
@@ -345,7 +345,7 @@ class Parallel(object):
             if type is not None:
                 # need to make sure each (per) message 
                 # won't block the pipe!
-                self._errormon.slaveraise(type, exception, traceback)
+                self._errormon.workerraise(type, exception, traceback)
             os._exit(0)
         
     def barrier(self):

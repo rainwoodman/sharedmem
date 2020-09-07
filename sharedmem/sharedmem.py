@@ -23,7 +23,7 @@
     - :py:meth:`sharedmem.empty_like`,
     - :py:meth:`sharedmem.copy`,
 
-    Shared memory segments are visible by the master process and slave 
+    Shared memory segments are visible by the master process and worker 
     processes in :py:class:`MapReduce`. Skillful usage of shared memory
     segments can avoid Python pickling as a bottle neck in the scalibility of
     your code.
@@ -38,7 +38,7 @@
     work with large shared memory chunks via numpy.ndarray.
 
     Environment variable :code:`OMP_NUM_THREADS` is used to determine the
-    default number of slaves. On PBS/Torque systems, :code:`PBS_NUM_PPN`
+    default number of workers. On PBS/Torque systems, :code:`PBS_NUM_PPN`
     is used if `OMP_NUM_THREADS is not defined`
 
     .. attention ::
@@ -116,7 +116,7 @@ __email__ = "rainwoodman@gmail.com"
 
 __all__ = ['set_debug', 'get_debug', 
         'total_memory', 'cpu_count', 
-        'SlaveException', 'StopProcessGroup',
+        'WorkerException', 'StopProcessGroup',
         'background',
         'MapReduce', 'MapReduceByThread',
         'empty', 'empty_like', 
@@ -201,7 +201,7 @@ def total_memory():
     raise IOError('MemTotal unknown')
 
 def cpu_count():
-    """ Returns the default number of slave processes to be spawned.
+    """ Returns the default number of worker processes to be spawned.
 
         The default value is the number of physical cpu cores seen by python.
         :code:`OMP_NUM_THREADS` environment variable overrides it.
@@ -228,8 +228,8 @@ class LostExceptionType(Warning):
     """
     pass
 
-class SlaveException(Exception):
-    """ Represents an exception that has occured during a slave process 
+class WorkerException(Exception):
+    """ Represents an exception that has occured during a worker process 
 
         Attributes
         ----------
@@ -254,7 +254,7 @@ class SlaveException(Exception):
 
 class StopProcessGroup(Exception):
     """ A special type of Exception. 
-        StopProcessGroup will terminate the slave process/thread 
+        StopProcessGroup will terminate the worker process/thread 
     """
     def __init__(self):
         Exception.__init__(self, "StopProcessGroup")
@@ -266,9 +266,9 @@ class ProcessGroup(object):
         self._tls = backend.StorageFactory()
         self.main = main
         self.args = args
-        self.slaveguard = threading.Thread(target=self._slaveGuard)
+        self.workerguard = threading.Thread(target=self._workerGuard)
         self.errorguard = threading.Thread(target=self._errorGuard)
-        # _allDead has to be from backend because the slaves will check
+        # _allDead has to be from backend because the workers will check
         # this variable via is_alive()
         self._allDead = backend.EventFactory()
         # each dead child releases one sempahore
@@ -277,24 +277,24 @@ class ProcessGroup(object):
         self.JoinedProcesses = multiprocessing.RawValue('l')
         # workers
         self.P = [
-            backend.SlaveFactory(target=self._slaveMain,
+            backend.WorkerFactory(target=self._workerMain,
                 args=(rank,)) \
                 for rank in range(np)
             ]
         # nanny threads
         self.N = [
-            threading.Thread(target=self._slaveNanny,
+            threading.Thread(target=self._workerNanny,
                 args=(rank, self.P[rank])) \
                 for rank in range(np)
             ]
         return
 
-    def _slaveMain(self, rank):
+    def _workerMain(self, rank):
         self._tls.rank = rank
         try:
             self.main(self, *self.args)
-        except SlaveException as e:
-            raise RuntimError("slave exception shall never be caught by a slave")
+        except WorkerException as e:
+            raise RuntimError("worker exception shall never be caught by a worker")
         except StopProcessGroup as e:
             pass
         except BaseException as e:
@@ -314,9 +314,9 @@ class ProcessGroup(object):
             except queue.Full:
                 pass
         finally:
-            # making all slaves exit one after another
-            # on some Linuxes if many slaves (56+) access
-            # mmap randomly the termination of the slaves
+            # making all workers exit one after another
+            # on some Linuxes if many workers (56+) access
+            # mmap randomly the termination of the workers
             # run into a deadlock.
             while self.JoinedProcesses.value < rank:
                 continue
@@ -347,13 +347,13 @@ class ProcessGroup(object):
             # for python 2.6.x wait returns None XXX
             self._allDead.wait(timeout=0.5)
 
-    def _slaveNanny(self, rank, process):
+    def _workerNanny(self, rank, process):
         process.join()
         if isinstance(process, threading.Thread):
             pass
         else:
             if process.exitcode < 0 and process.exitcode != -5:
-                e = Exception("slave process %d killed by signal %d" % (rank, -
+                e = Exception("worker process %d killed by signal %d" % (rank, -
                     process.exitcode))
                 try:
                     self.Errors.put((e, ""), timeout=0)
@@ -361,7 +361,7 @@ class ProcessGroup(object):
                     pass
         self.semaphore.release() 
 
-    def _slaveGuard(self):
+    def _workerGuard(self):
         # this guard will wait till all children are dead.
         for x in self.N:
             self.semaphore.acquire()
@@ -390,25 +390,25 @@ class ProcessGroup(object):
 
         # p is alive from the moment start returns.
         # thus we can join them immediately after start returns.
-        # guardMain will check if the slave has been
+        # guardMain will check if the worker has been
         # killed by the os, and simulate an error if so.
         for x in self.N:
             x.start()
         self.errorguard.start()
-        self.slaveguard.start()
+        self.workerguard.start()
 
     def get_exception(self):
         # give it a bit of slack in case the error is not yet posted.
         # XXX: why does this happen?
         exp = self.Errors.get(timeout=1)
-        return SlaveException(*exp)
+        return WorkerException(*exp)
 
     def get(self, Q):
         """ Protected get. Get an item from Q.
             Will block. but if the process group has errors,
             raise an StopProcessGroup exception.
 
-            A slave process will terminate upon StopProcessGroup.
+            A worker process will terminate upon StopProcessGroup.
             The master process shall read the error from the process group.
 
         """
@@ -452,9 +452,9 @@ class ProcessGroup(object):
             x.join()
 
         self.errorguard.join()
-        self.slaveguard.join()
+        self.workerguard.join()
         if not self.Errors.empty():
-            raise SlaveException(*self.Errors.get())
+            raise WorkerException(*self.Errors.get())
 
 class Ordered(object):
     def __init__(self, backend):
@@ -490,10 +490,10 @@ class ThreadBackend:
       LockFactory = staticmethod(threading.Lock)
       StorageFactory = staticmethod(threading.local)
       @staticmethod
-      def SlaveFactory(*args, **kwargs):
-        slave = threading.Thread(*args, **kwargs)
-        slave.daemon = True
-        return slave
+      def WorkerFactory(*args, **kwargs):
+        worker = threading.Thread(*args, **kwargs)
+        worker.daemon = True
+        return worker
 
 class ProcessBackend:
       QueueFactory = staticmethod(multiprocessing.Queue)
@@ -501,10 +501,10 @@ class ProcessBackend:
       LockFactory = staticmethod(multiprocessing.Lock)
 
       @staticmethod
-      def SlaveFactory(*args, **kwargs):
-        slave = multiprocessing.Process(*args, **kwargs)
-        slave.daemon = True
-        return slave
+      def WorkerFactory(*args, **kwargs):
+        worker = multiprocessing.Process(*args, **kwargs)
+        worker.daemon = True
+        return worker
       @staticmethod
       def StorageFactory():
           return lambda:None
@@ -533,9 +533,9 @@ class background(object):
         backend = kwargs.pop('backend', ProcessBackend)
 
         self.result = backend.QueueFactory(1)
-        self.slave = backend.SlaveFactory(target=self._closure, 
+        self.worker = backend.WorkerFactory(target=self._closure, 
                 args=(function, args, kwargs, self.result))
-        self.slave.start()
+        self.worker.start()
 
     def _closure(self, function, args, kwargs, result):
         try:
@@ -551,11 +551,11 @@ class background(object):
             If any exception occurred it is wrapped and raised.
         """
         e, r = self.result.get()
-        self.slave.join()
-        self.slave = None
+        self.worker.join()
+        self.worker = None
         self.result = None
         if isinstance(e, Exception):
-            raise SlaveException(e, r)
+            raise WorkerException(e, r)
         return r
 
 def MapReduceByThread(np=None):
@@ -567,7 +567,7 @@ def MapReduceByThread(np=None):
 
 class MapReduce(object):
     """
-        A pool of slave processes for a Map-Reduce operation
+        A pool of worker processes for a Map-Reduce operation
 
         Parameters
         ----------
@@ -612,7 +612,7 @@ class MapReduce(object):
             self.np = np
 
     def _main(self, pg, Q, R, sequence, realfunc):
-        # get and put will raise SlaveException
+        # get and put will raise WorkerException
         # and terminate the process.
         # the exception is muted in ProcessGroup,
         # as it will only be dispatched from master.
@@ -666,7 +666,7 @@ class MapReduce(object):
 
                     func is not supposed to use exceptions for flow control.
                     In non-debug mode all exceptions will be wrapped into
-                    a :py:class:`SlaveException`.
+                    a :py:class:`WorkerException`.
 
             sequence : list or array_like
                 The sequence of arguments to be applied to func.
@@ -694,9 +694,9 @@ class MapReduce(object):
                 
             Raises
             ------
-            SlaveException
-                If any of the slave process encounters
-                an exception. Inspect :py:attr:`SlaveException.reason` for the underlying exception.
+            WorkerException
+                If any of the worker process encounters
+                an exception. Inspect :py:attr:`WorkerException.reason` for the underlying exception.
         
         """ 
         def realreduce(r):
