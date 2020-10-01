@@ -141,6 +141,33 @@ def test_memory_pickle():
     b[:] += 10
     assert (a == b).all()
 
+def test_memory_pickle_reversed():
+    import pickle
+    a = sharedmem.empty(100)
+    a[:] = range(100)
+    a = a[::-1]
+    s = pickle.dumps(a)
+    b = pickle.loads(s)
+
+    assert isinstance(b, type(a))
+
+    b[:] += 10
+    assert (a == b).all()
+
+def test_memory_pickle_reshaped():
+    import pickle
+    a = sharedmem.empty(100)
+    a[:] = range(100)
+    a = a.reshape(10, 5, 2).transpose((2, 1, 0))
+    s = pickle.dumps(a)
+    b = pickle.loads(s)
+
+    assert isinstance(b, type(a))
+
+    b[:] += 10
+    b = b.transpose((2, 1, 0)).ravel()
+    assert (b == numpy.arange(100) + 10).all()
+
 def test_memory_type():
     a = sharedmem.empty(100)
     b = sharedmem.empty(100)
@@ -150,6 +177,14 @@ def test_memory_type():
     assert not isinstance(numpy.sum(a), type(a))
     assert not isinstance(a + b, type(a))
     assert not isinstance(a * b, type(a))
+
+def test_memory_pickle_zero():
+    # issue #21
+    import pickle
+    sha = sharedmem.empty((5,0), dtype='f4')
+    b = pickle.dumps(sha)
+    shb = pickle.loads(b)
+    assert sha.shape == shb.shape
 
 def test_local():
     t = sharedmem.empty(800)
@@ -306,7 +341,6 @@ def test_wordcount():
 
     for word in word_count:
         assert word_count[word] == parallel_result[word]
-
 
 if __name__ == "__main__":
     import sys

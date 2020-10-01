@@ -847,22 +847,34 @@ except:
 
 def __unpickle__(ai, dtype):
     dtype = numpy.dtype(dtype)
-    tp = _unpickle_ctypes_type * 1
+    tp = _unpickle_ctypes_type
 
-    # if there are strides, use strides, otherwise the stride is the itemsize of dtype
+    # The following lb ub logic replaces ctypeslib.as_ctypes() that does not support
+    # strides.
     if ai['strides']:
-        tp *= ai['strides'][-1]
+        lb = 0
+        ub = dtype.itemsize
+        for s, t in zip(ai['strides'], ai['shape']):
+            if t == 0:  # there is no data if any shape is 0.
+                lb, ub = 0, 0
+                break
+            if s < 0:
+                lb = lb + (t - 1) * s
+            else:
+                ub = ub + (t - 1) * s
     else:
-        tp *= dtype.itemsize
+        lb = 0
+        ub = dtype.itemsize
+        for s in ai['shape']:
+            ub = ub * s
 
-    for i in numpy.asarray(ai['shape'])[::-1]:
-        tp *= i
+    # grab a flat char array at the sharemem address, covering the memory region
+    # ai refers to.
+    ra = (tp * (ub - lb)).from_address(ai['data'][0] + lb)
 
-    # grab a flat char array at the sharemem address, with length at least contain ai required
-    ra = tp.from_address(ai['data'][0])
-    buffer = numpy.ctypeslib.as_array(ra).ravel()
-    # view it as what it should look like
-    shm = numpy.ndarray(buffer=buffer, dtype=dtype, 
+    # view it as what it should look like. here we assume numpy will not do crazy
+    # things like modifying gaps due to striding.
+    shm = numpy.ndarray(buffer=ra, dtype=dtype, offset=-lb,
             strides=ai['strides'], shape=ai['shape']).view(type=anonymousmemmap)
     return shm
 
