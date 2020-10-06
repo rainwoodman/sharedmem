@@ -732,8 +732,6 @@ class MapReduce(object):
                 backend=self.backend,
                 args=(Q, R, sequence, realfunc))
 
-        pg.start()
-
         L = []
         N = []
         def feeder(pg, Q, N):
@@ -755,6 +753,10 @@ class MapReduce(object):
             finally:
                 pass
         feeder = threading.Thread(None, feeder, args=(pg, Q, N))
+
+        if hasattr(gc, 'freeze'):
+            gc.freeze()
+        pg.start()
         feeder.start()
 
         # we run fetcher on main thread to catch exceptions
@@ -780,8 +782,6 @@ class MapReduce(object):
 #            R.join_thread()
             while len(L) > 0:
                 rt.append(heapq.heappop(L)[1])
-            pg.join()
-            feeder.join()
             assert N[0] == len(rt)
             return rt
         except BaseException as e:
@@ -790,9 +790,12 @@ class MapReduce(object):
                 Q.cancel_join_thread()
                 R.cancel_join_thread()
             pg.killall()
+            raise
+        finally:
             pg.join()
             feeder.join()
-            raise
+            if hasattr(gc, 'freeze'):
+                gc.unfreeze()
 
 
 def empty_like(array, dtype=None):
