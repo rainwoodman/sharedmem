@@ -1,4 +1,9 @@
 build/
+dist/
+*.egg-info/
 *.pyc
 *.so
+__pycache__/
+.pytest_cache/
+.venv/
 sharedmem/lib/_mergesort.c

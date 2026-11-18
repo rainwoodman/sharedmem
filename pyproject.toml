@@ -1,0 +1,49 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "sharedmem"
+version = "0.3.8"
+description = "Dispatch your trivially parallelizable jobs with sharedmem."
+readme = "README.rst"
+license = "GPL-3.0-only"
+license-files = ["LICENSE"]
+requires-python = ">=3.9"
+authors = [
+    { name = "Yu Feng", email = "rainwoodman@gmail.com" },
+]
+dependencies = [
+    "numpy",
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Science/Research",
+    "Operating System :: POSIX",
+    "Operating System :: POSIX :: Linux",
+    "Operating System :: MacOS",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+]
+
+[project.urls]
+Homepage = "https://github.com/rainwoodman/sharedmem"
+Repository = "https://github.com/rainwoodman/sharedmem"
+Documentation = "https://rainwoodman.github.io/sharedmem/"
+Issues = "https://github.com/rainwoodman/sharedmem/issues"
+
+[project.optional-dependencies]
+test = [
+    "pytest",
+]
+
+[tool.setuptools]
+packages = ["sharedmem", "sharedmem.tests"]
+
+[tool.pytest.ini_options]
+testpaths = ["sharedmem/tests"]

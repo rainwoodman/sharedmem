@@ -139,6 +139,7 @@ import gc
 import threading
 import heapq
 import os
+import signal
 
 try:
     import cPickle as pickle
@@ -151,6 +152,18 @@ import ctypes
 import mmap
 #logger = multiprocessing.log_to_stderr()
 #logger.setLevel(multiprocessing.SUBDEBUG)
+
+# sharedmem relies on fork() copy-on-write semantics rather than pickling
+# closures/locals to worker processes. Explicitly request the 'fork' context
+# on POSIX because macOS (Python 3.8+) defaults to 'spawn' and Linux
+# (Python 3.14+) defaults to 'forkserver'.
+if os.name == 'posix':
+    try:
+        _mp = multiprocessing.get_context('fork')
+    except ValueError:
+        _mp = multiprocessing.get_context()
+else:
+    _mp = multiprocessing
 
 __shmdebug__ = False
 
@@ -193,11 +206,11 @@ def total_memory():
         This function is not very useful and not very portable. 
 
     """
-    with file('/proc/meminfo', 'r') as f:
+    with open('/proc/meminfo', 'r') as f:
         for line in f:
             words = line.split()
-        if words[0].upper() == 'MEMTOTAL:':
-            return int(words[1]) * 1024
+            if words and words[0].upper() == 'MEMTOTAL:':
+                return int(words[1]) * 1024
     raise IOError('MemTotal unknown')
 
 def cpu_count():
@@ -274,7 +287,7 @@ class ProcessGroup(object):
         # each dead child releases one sempahore
         # when all children are dead, will set _allDead event.
         self.semaphore = threading.Semaphore(0)
-        self.JoinedProcesses = multiprocessing.RawValue('l')
+        self.JoinedProcesses = _mp.RawValue('l')
         # workers
         self.P = [
             backend.WorkerFactory(target=self._workerMain,
@@ -294,7 +307,7 @@ class ProcessGroup(object):
         try:
             self.main(self, *self.args)
         except WorkerException as e:
-            raise RuntimError("worker exception shall never be caught by a worker")
+            raise RuntimeError("worker exception shall never be caught by a worker")
         except StopProcessGroup as e:
             pass
         except BaseException as e:
@@ -329,8 +342,8 @@ class ProcessGroup(object):
                 if isinstance(p, threading.Thread):
                     # will die on next self.get() / self.put()
                     p.join()
-                else:
-                    os.kill(p._popen.pid, 5)
+                elif p.pid is not None:
+                    os.kill(p.pid, signal.SIGTRAP)
             except Exception as e:
                 print(e)
                 continue
@@ -352,7 +365,7 @@ class ProcessGroup(object):
         if isinstance(process, threading.Thread):
             pass
         else:
-            if process.exitcode < 0 and process.exitcode != -5:
+            if process.exitcode < 0 and process.exitcode != -signal.SIGTRAP:
                 e = Exception("worker process %d killed by signal %d" % (rank, -
                     process.exitcode))
                 try:
@@ -461,7 +474,7 @@ class Ordered(object):
       #  self.counter = lambda : None
         #multiprocessing.RawValue('l')
         self.event = backend.EventFactory()
-        self.counter = multiprocessing.RawValue('l')
+        self.counter = _mp.RawValue('l')
         self.tls = backend.StorageFactory()
 
     def reset(self):
@@ -496,13 +509,18 @@ class ThreadBackend:
         return worker
 
 class ProcessBackend:
-      QueueFactory = staticmethod(multiprocessing.Queue)
-      EventFactory = staticmethod(multiprocessing.Event)
-      LockFactory = staticmethod(multiprocessing.Lock)
+      QueueFactory = staticmethod(_mp.Queue)
+      EventFactory = staticmethod(_mp.Event)
+      LockFactory = staticmethod(_mp.Lock)
 
       @staticmethod
       def WorkerFactory(*args, **kwargs):
-        worker = multiprocessing.Process(*args, **kwargs)
+        if 'fork' not in multiprocessing.get_all_start_methods():
+            raise NotImplementedError(
+                "ProcessBackend requires the 'fork' start method (POSIX only); "
+                "use MapReduceByThread instead."
+            )
+        worker = _mp.Process(*args, **kwargs)
         worker.daemon = True
         return worker
       @staticmethod
@@ -711,7 +729,7 @@ class MapReduce(object):
             if star: return func(*i)
             else: return func(i)
 
-        if len(sequence) <= 0 or self.np == 0 or get_debug():
+        if len(sequence) <= 0 or len(sequence) < minlength or self.np == 0 or get_debug():
             # Do this in serial
             self.local = lambda : None
             self.local.rank = 0
@@ -904,9 +922,9 @@ class anonymousmemmap(numpy.memmap):
         self._mmap = mm
         return self
         
-    def __array_wrap__(self, outarr, context=None):
-    # after ufunc this won't be on shm!
-        return numpy.ndarray.__array_wrap__(self.view(numpy.ndarray), outarr, context)
+    def __array_wrap__(self, outarr, context=None, return_scalar=False):
+        # after ufunc this won't be on shm!
+        return numpy.ndarray.__array_wrap__(self.view(numpy.ndarray), outarr, context, return_scalar)
 
     def __reduce__(self):
         return __unpickle__, (self.__array_interface__, self.dtype)

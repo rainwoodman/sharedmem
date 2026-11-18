@@ -3,7 +3,7 @@ import sharedmem
 import time
 
 from numpy.testing import (assert_equal, assert_array_equal,
-    assert_almost_equal, assert_array_almost_equal, assert_, run_module_suite)
+    assert_almost_equal, assert_array_almost_equal, assert_)
 import sys
 
 def test_create():
@@ -103,14 +103,14 @@ def test_unpicklable_raise():
             time.sleep(0.1 * numpy.random.uniform())
             if i == 10:
                 raise UnpicklableException("Raise an exception")
-        try:
-            with warnings.catch_warnings(record=True) as w:
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            try:
                 pool.map(work, range(100))
-            # except an warning here
-            assert len(w) == 1 
-        except Exception as e:
-            assert not isinstance(e.reason, UnpicklableException) 
-            return
+            except sharedmem.WorkerException as e:
+                assert len(w) == 1
+                assert not isinstance(e.reason, UnpicklableException)
+                return
     raise AssertionError("Shall not reach here")
 
 class PicklableException(Exception):
@@ -326,7 +326,10 @@ def test_wordcount():
             for word in word_count:
                 word_count[word] += her_word_count[word]
 
-        pool.map(work, open(__file__, 'r').readlines(), reduce=reduce)
+        with open(__file__, 'r') as f:
+            lines = f.readlines()
+
+        pool.map(work, lines, reduce=reduce)
 
         parallel_result = dict(word_count)
 
@@ -336,12 +339,85 @@ def test_wordcount():
         for word in word_count:
             word_count[word] = 0
 
-        pool.map(work, open(__file__, 'r').readlines(), reduce=reduce)
+        pool.map(work, lines, reduce=reduce)
         sharedmem.set_debug(False)
 
     for word in word_count:
         assert word_count[word] == parallel_result[word]
 
-if __name__ == "__main__":
-    import sys
-    run_module_suite()
+
+def test_non_fork_default_start_method():
+    """MapReduce must work even when the global start method is spawn or forkserver."""
+    import multiprocessing
+    import subprocess
+
+    for method in ('spawn', 'forkserver'):
+        if method not in multiprocessing.get_all_start_methods():
+            continue
+        code = "\n".join([
+            "import multiprocessing",
+            f"multiprocessing.set_start_method({method!r}, force=True)",
+            "import sharedmem",
+            "out = sharedmem.empty(4, dtype='i8')",
+            "out[:] = 0",
+            "s = sharedmem.empty((), dtype='i8')",
+            "s[...] = 0",
+            "with sharedmem.MapReduce(np=2) as pool:",
+            "    def work(i):",
+            "        with pool.ordered:",
+            "            out[i] = i * 2",
+            "        with pool.critical:",
+            "            s[...] += i",
+            "        return i + 1",
+            "    r = pool.map(work, range(4))",
+            "assert r == [1, 2, 3, 4], r",
+            "assert list(out) == [0, 2, 4, 6], list(out)",
+            "assert int(s) == 6, int(s)",
+        ])
+        proc = subprocess.run(
+            [sys.executable, '-c', code],
+            capture_output=True,
+            text=True,
+        )
+        assert proc.returncode == 0, (
+            f"Failed under start method {method!r}:\n"
+            f"stdout: {proc.stdout}\nstderr: {proc.stderr}"
+        )
+
+
+def test_ufunc_no_deprecation_warning():
+    a = sharedmem.full(10, 2.0, dtype='f8')
+    b = sharedmem.full(10, 3.0, dtype='f8')
+    s = sharedmem.empty((), dtype='f8')
+    s[...] = 5.0
+
+    with warnings.catch_warnings(record=True) as w:
+        warnings.simplefilter("always")
+        _ = a + 10
+        _ = a + b
+        _ = a * b
+        b[:] += 10
+        _ = numpy.sum(a)
+        _ = s + 1.0
+
+    dep_warnings = [x for x in w if issubclass(x.category, DeprecationWarning)]
+    assert dep_warnings == [], [str(x.message) for x in dep_warnings]
+
+
+def test_minlength():
+    import os
+    parent_pid = os.getpid()
+    with sharedmem.MapReduce(np=2) as pool:
+        def work(i):
+            return os.getpid(), pool.local.rank, i
+        r = pool.map(work, range(3), minlength=5)
+    assert r == [(parent_pid, 0, i) for i in range(3)]
+
+
+def test_total_memory():
+    import os
+    if not os.path.exists('/proc/meminfo'):
+        return
+    mem = sharedmem.total_memory()
+    assert isinstance(mem, int) and mem > 0
+
