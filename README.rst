@@ -1,8 +1,8 @@
 Dispatch your trivially parallizable jobs with sharedmem.
 
-.. image:: https://api.travis-ci.org/rainwoodman/sharedmem.svg
+.. image:: https://github.com/rainwoodman/sharedmem/actions/workflows/ci.yml/badge.svg
     :alt: Build Status
-    :target: https://travis-ci.org/rainwoodman/sharedmem/
+    :target: https://github.com/rainwoodman/sharedmem/actions/workflows/ci.yml
 
 To cite sharedmem use the DOI below
 
